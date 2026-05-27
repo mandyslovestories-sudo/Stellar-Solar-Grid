@@ -14,9 +14,9 @@ type Plan = "Daily" | "Weekly" | "Usage";
 type Status = "idle" | "loading";
 
 const PLANS: { value: Plan; label: string; desc: string }[] = [
-  { value: "Daily",  label: "Daily",       desc: "Billed every 24 hours" },
-  { value: "Weekly", label: "Weekly",      desc: "Billed every 7 days"   },
-  { value: "Usage",  label: "Usage-Based", desc: "Pay per kWh consumed"  },
+  { value: "Daily", label: "Daily", desc: "Billed every 24 hours" },
+  { value: "Weekly", label: "Weekly", desc: "Billed every 7 days" },
+  { value: "Usage", label: "Usage-Based", desc: "Pay per kWh consumed" },
 ];
 
 export default function PayPage() {
@@ -25,9 +25,10 @@ export default function PayPage() {
   const { showToast } = useToast();
   const isOffline = useOffline();
 
-  const [amount, setAmount]       = useState("");
-  const [status, setStatus]       = useState<Status>("idle");
+  const [amount, setAmount] = useState("");
+  const [status, setStatus] = useState<Status>("idle");
   const [showSmsModal, setShowSmsModal] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const EXPLORER_BASE = process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE?.includes("Test")
     ? "https://stellar.expert/explorer/testnet/tx"
@@ -40,14 +41,20 @@ export default function PayPage() {
     const amountNum = parseFloat(amount);
     if (!meterId.trim() || isNaN(amountNum) || amountNum <= 0) return;
 
+    // Show confirmation modal instead of submitting directly
+    setShowConfirm(true);
+  }
+
+  async function confirmPayment() {
+    setShowConfirm(false);
     setStatus("loading");
 
     try {
-      const hash = await makePayment(address, meterId.trim(), amountNum, plan);
+      const hash = await makePayment(address, meterId.trim(), parseFloat(amount), plan);
       showToast({
         variant: "success",
         title: "Payment successful",
-        description: `${meterId.trim()} was topped up with ${amountNum.toFixed(2)} XLM.`,
+        description: `${meterId.trim()} was topped up with ${parseFloat(amount).toFixed(2)} XLM.`,
         actionHref: `${EXPLORER_BASE}/${hash}`,
         actionLabel: "View transaction",
       });
@@ -57,9 +64,7 @@ export default function PayPage() {
       showToast({
         variant: "error",
         title:
-          friendly === "Transaction cancelled by user."
-            ? "Payment cancelled"
-            : "Payment failed",
+          friendly === "Transaction cancelled by user." ? "Payment cancelled" : "Payment failed",
         description: friendly,
       });
     } finally {
@@ -89,9 +94,7 @@ export default function PayPage() {
 
       <main className="min-h-screen flex items-start justify-center px-4 py-8 sm:py-16">
         <div className="w-full max-w-md">
-          <h1 className="text-2xl sm:text-3xl font-bold text-solar-yellow mb-2">
-            Make a Payment
-          </h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-solar-yellow mb-2">Make a Payment</h1>
           <p className="text-gray-400 text-sm mb-6">
             Top up your meter balance on the Stellar blockchain.
           </p>
@@ -106,7 +109,8 @@ export default function PayPage() {
                     No internet connection
                   </p>
                   <p className="text-xs text-gray-400 mb-3">
-                    You can still top up your meter by sending an SMS. No smartphone or data required.
+                    You can still top up your meter by sending an SMS. No smartphone or data
+                    required.
                   </p>
                   <button
                     onClick={() => setShowSmsModal(true)}
@@ -143,9 +147,7 @@ export default function PayPage() {
                 Connect Wallet
               </button>
               {isOffline && (
-                <p className="mt-2 text-xs text-gray-500">
-                  Wallet connection requires internet.
-                </p>
+                <p className="mt-2 text-xs text-gray-500">Wallet connection requires internet.</p>
               )}
             </div>
           ) : (
@@ -155,9 +157,7 @@ export default function PayPage() {
             >
               {/* Meter ID */}
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1.5">
-                  Meter ID
-                </label>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Meter ID</label>
                 <input
                   type="text"
                   value={meterId}
@@ -187,9 +187,7 @@ export default function PayPage() {
 
               {/* Plan */}
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Billing Plan
-                </label>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Billing Plan</label>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                   {PLANS.map((p) => (
                     <button
@@ -211,15 +209,16 @@ export default function PayPage() {
 
               {/* Submit */}
               <button
-                type="submit"
+                type="button"
+                onClick={() => setShowConfirm(true)}
                 disabled={status === "loading" || isOffline}
                 className="w-full rounded-lg bg-solar-yellow py-3.5 text-base font-semibold text-solar-dark hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition"
               >
                 {isOffline
                   ? "Unavailable offline"
                   : status === "loading"
-                  ? "Waiting for wallet…"
-                  : "Pay Now"}
+                    ? "Waiting for wallet…"
+                    : "Pay Now"}
               </button>
 
               {isOffline && (
@@ -237,14 +236,58 @@ export default function PayPage() {
             </form>
           )}
         </div>
+
+        {/* ── Payment confirmation modal ── */}
+        {showConfirm && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-payment-title"
+          >
+            <div className="w-full max-w-sm rounded-xl border border-white/10 bg-solar-accent p-6 shadow-2xl">
+              <h3 id="confirm-payment-title" className="text-lg font-semibold text-white mb-4">
+                Confirm Payment
+              </h3>
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Meter ID</span>
+                  <strong className="text-white">{meterId}</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Plan</span>
+                  <strong className="text-white capitalize">{plan}</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Amount</span>
+                  <strong className="text-solar-yellow">{amount} XLM</strong>
+                </div>
+              </div>
+              <div className="mt-6 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowConfirm(false)}
+                  className="flex-1 rounded-lg border border-white/10 bg-transparent px-4 py-2.5 text-sm font-semibold text-gray-300 hover:bg-white/5 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmPayment}
+                  disabled={status === "loading"}
+                  className="flex-1 rounded-lg bg-solar-yellow px-4 py-2.5 text-sm font-semibold text-solar-dark hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                >
+                  Confirm & Sign
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* ── SMS modal ── */}
       {showSmsModal && (
-        <OfflinePaymentModal
-          meterId={meterId}
-          onClose={() => setShowSmsModal(false)}
-        />
+        <OfflinePaymentModal meterId={meterId} onClose={() => setShowSmsModal(false)} />
       )}
     </>
   );

@@ -32,4 +32,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: cd backend && npm ci && npm run build
+      - run: cd backend && npm ci
+      - run: cd backend && npm run build
+      - run: cd backend && npm run test:e2e
+        env:
+          STELLAR_NETWORK: testnet
+          CONTRACT_ID: ${{ secrets.CONTRACT_ID }}
+          ADMIN_SECRET_KEY: ${{ secrets.ADMIN_SECRET_KEY }}
