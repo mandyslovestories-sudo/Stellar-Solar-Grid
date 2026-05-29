@@ -12,82 +12,107 @@ export const RPC_URL =
     ? "https://soroban-rpc.stellar.org"
     : "https://soroban-testnet.stellar.org";
 
-export const CONTRACT_ID = process.env.CONTRACT_ID!;
-export const server = new StellarSdk.SorobanRpc.Server(RPC_URL);
+export class StellarService {
+  readonly server: StellarSdk.SorobanRpc.Server;
+  readonly contractId: string;
+  private readonly networkPassphrase: string;
+  private readonly adminKeypair: StellarSdk.Keypair;
 
-// Load keypair once at module init. The raw secret string is never referenced again.
-const adminKeypair = StellarSdk.Keypair.fromSecret(process.env.ADMIN_SECRET_KEY!);
-
-/** Submit a signed contract invocation from the admin keypair. */
-export async function adminInvoke(
-  method: string,
-  args: StellarSdk.xdr.ScVal[]
-): Promise<string> {
-  const account = await server.getAccount(adminKeypair.publicKey());
-  const contract = new StellarSdk.Contract(CONTRACT_ID);
-
-  let tx = new StellarSdk.TransactionBuilder(account, {
-    fee: "100",
-    networkPassphrase: NETWORK_PASSPHRASE,
-  })
-    .addOperation(contract.call(method, ...args))
-    .setTimeout(30)
-    .build();
-
-  const sim = await server.simulateTransaction(tx);
-  if (StellarSdk.SorobanRpc.Api.isSimulationError(sim)) {
-    throw new Error(sim.error);
+  constructor(config: {
+    rpcUrl: string;
+    adminSecret: string;
+    contractId: string;
+    network: string;
+  }) {
+    this.server = new StellarSdk.SorobanRpc.Server(config.rpcUrl);
+    // Load keypair once. The raw secret string is not referenced after this.
+    this.adminKeypair = StellarSdk.Keypair.fromSecret(config.adminSecret);
+    this.contractId = config.contractId;
+    this.networkPassphrase = config.network;
   }
 
-  tx = StellarSdk.SorobanRpc.assembleTransaction(tx, sim).build();
-  tx.sign(adminKeypair);
+  /** Submit a signed contract invocation from the admin keypair. */
+  async invoke(method: string, args: StellarSdk.xdr.ScVal[]): Promise<string> {
+    const account = await this.server.getAccount(this.adminKeypair.publicKey());
+    const contract = new StellarSdk.Contract(this.contractId);
 
-  const sendResult = await server.sendTransaction(tx);
-  if (sendResult.status === "ERROR") {
-    contractCalls.inc({ method, status: "error" });
-    throw new Error(`Transaction submission failed: ${sendResult.errorResult}`);
-  }
+    let tx = new StellarSdk.TransactionBuilder(account, {
+      fee: "100",
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(contract.call(method, ...args))
+      .setTimeout(30)
+      .build();
 
-  const hash = sendResult.hash;
-  const timeoutMs = Number(process.env.TX_TIMEOUT_MS ?? 30_000);
-  const deadline = Date.now() + timeoutMs;
-
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 1_500));
-    const status = await server.getTransaction(hash);
-    if (status.status === StellarSdk.SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
-      contractCalls.inc({ method, status: "success" });
-      return hash;
+    const sim = await this.server.simulateTransaction(tx);
+    if (StellarSdk.SorobanRpc.Api.isSimulationError(sim)) {
+      throw new Error(sim.error);
     }
-    if (status.status === StellarSdk.SorobanRpc.Api.GetTransactionStatus.FAILED) {
+
+    tx = StellarSdk.SorobanRpc.assembleTransaction(tx, sim).build();
+    tx.sign(this.adminKeypair);
+
+    const sendResult = await this.server.sendTransaction(tx);
+    if (sendResult.status === "ERROR") {
       contractCalls.inc({ method, status: "error" });
-      throw new Error(`Transaction ${hash} failed on-chain`);
+      throw new Error(`Transaction submission failed: ${sendResult.errorResult}`);
     }
+
+    const hash = sendResult.hash;
+    const timeoutMs = Number(process.env.TX_TIMEOUT_MS ?? 30_000);
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 1_500));
+      const status = await this.server.getTransaction(hash);
+      if (status.status === StellarSdk.SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+        contractCalls.inc({ method, status: "success" });
+        return hash;
+      }
+      if (status.status === StellarSdk.SorobanRpc.Api.GetTransactionStatus.FAILED) {
+        contractCalls.inc({ method, status: "error" });
+        throw new Error(`Transaction ${hash} failed on-chain`);
+      }
+    }
+
+    contractCalls.inc({ method, status: "timeout" });
+    throw new Error(`Transaction ${hash} not confirmed within ${timeoutMs}ms`);
   }
 
-  contractCalls.inc({ method, status: "timeout" });
-  throw new Error(`Transaction ${hash} not confirmed within ${timeoutMs}ms`);
-}
+  /** Read-only simulation. */
+  async query(
+    method: string,
+    args: StellarSdk.xdr.ScVal[]
+  ): Promise<StellarSdk.xdr.ScVal> {
+    const account = await this.server.getAccount(this.adminKeypair.publicKey());
+    const contract = new StellarSdk.Contract(this.contractId);
 
-/** Read-only simulation. */
-export async function contractQuery(
-  method: string,
-  args: StellarSdk.xdr.ScVal[]
-): Promise<StellarSdk.xdr.ScVal> {
-  const account = await server.getAccount(adminKeypair.publicKey());
-  const contract = new StellarSdk.Contract(CONTRACT_ID);
+    const tx = new StellarSdk.TransactionBuilder(account, {
+      fee: "100",
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(contract.call(method, ...args))
+      .setTimeout(30)
+      .build();
 
-  const tx = new StellarSdk.TransactionBuilder(account, {
-    fee: "100",
-    networkPassphrase: NETWORK_PASSPHRASE,
-  })
-    .addOperation(contract.call(method, ...args))
-    .setTimeout(30)
-    .build();
-
-  const sim = await server.simulateTransaction(tx);
-  if (StellarSdk.SorobanRpc.Api.isSimulationError(sim)) {
-    throw new Error(sim.error);
+    const sim = await this.server.simulateTransaction(tx);
+    if (StellarSdk.SorobanRpc.Api.isSimulationError(sim)) {
+      throw new Error(sim.error);
+    }
+    return (sim as any).result?.retval;
   }
-  return (sim as any).result?.retval;
 }
+
+// Singleton instance — created once at startup and injected into routes.
+export const stellarService = new StellarService({
+  rpcUrl: RPC_URL,
+  adminSecret: process.env.ADMIN_SECRET_KEY!,
+  contractId: process.env.CONTRACT_ID!,
+  network: NETWORK_PASSPHRASE,
+});
+
+// Back-compat aliases so existing callers (bridge, payments) keep working.
+export const CONTRACT_ID = stellarService.contractId;
+export const server = stellarService.server;
+export const adminInvoke = stellarService.invoke.bind(stellarService);
+export const contractQuery = stellarService.query.bind(stellarService);
