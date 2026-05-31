@@ -81,6 +81,40 @@ meterRouter.post(
   }),
 );
 
+/** GET /api/meters/:id/balance — live balance for a single meter */
+const balanceCache = new Map<string, { data: any; ts: number }>();
+const BALANCE_CACHE_TTL_MS = 5_000; // 5-second cache to reduce RPC load
+
+meterRouter.get(
+  "/:id/balance",
+  asyncHandler(async (req, res) => {
+    const meterId = req.params.id;
+
+    // Check cache first
+    const cached = balanceCache.get(meterId);
+    if (cached && Date.now() - cached.ts < BALANCE_CACHE_TTL_MS) {
+      return res.json(cached.data);
+    }
+
+    try {
+      const result = await contractQuery("get_meter", [
+        StellarSdk.nativeToScVal(meterId, { type: "symbol" }),
+      ]);
+      const meter = StellarSdk.scValToNative(result) as any;
+      const payload = {
+        meter_id: meterId,
+        balance: meter.balance,
+        units_used: meter.units_used,
+        active: meter.active,
+      };
+      balanceCache.set(meterId, { data: payload, ts: Date.now() });
+      res.json(payload);
+    } catch (err: any) {
+      res.status(404).json({ error: "Meter not found" });
+    }
+  }),
+);
+
 /** GET /api/meters/:id/history — paginated local usage history */
 meterRouter.get("/:id/history", (req, res) => {
   const page = Math.max(1, Number(req.query.page ?? 1) || 1);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import UsageChart, { type UsageDataPoint } from "@/components/UsageChart";
@@ -12,6 +12,9 @@ import { parseWalletError } from "@/lib/errors";
 import { useToast } from "@/components/ToastProvider";
 
 const STROOPS_PER_XLM = 10_000_000n;
+
+const API = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:3001";
+const BALANCE_POLL_INTERVAL_MS = 30_000; // 30 seconds
 
 function stroopsToXlm(stroops: bigint): string {
   const whole = stroops / STROOPS_PER_XLM;
@@ -241,6 +244,47 @@ export default function UserDashboardPage() {
     }
     fetchAll();
   }, [address, fetchAll]);
+
+  // Poll individual meter balances every 30s for live updates
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (!address || meterIds.length === 0) {
+      if (pollRef.current) clearInterval(pollRef.current);
+      return;
+    }
+
+    async function pollBalances() {
+      for (const id of meterIds) {
+        try {
+          const res = await fetch(`${API}/api/meters/${id}/balance`);
+          if (!res.ok) continue;
+          const data = await res.json();
+          setMeters((prev) => {
+            const existing = prev[id];
+            if (!existing) return prev;
+            return {
+              ...prev,
+              [id]: {
+                ...existing,
+                balance: BigInt(data.balance ?? existing.balance),
+                units_used: data.units_used ?? existing.units_used,
+                active: data.active ?? existing.active,
+              },
+            };
+          });
+        } catch {
+          // Silently skip — full refresh will recover
+        }
+      }
+      setLastRefresh(new Date());
+    }
+
+    pollRef.current = setInterval(pollBalances, BALANCE_POLL_INTERVAL_MS);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [address, meterIds]);
 
   return (
     <>

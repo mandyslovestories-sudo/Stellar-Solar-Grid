@@ -73,6 +73,31 @@ The `SolarGrid` contract manages:
 | `check_access(meter_id)` | Check if meter is currently active |
 | `get_usage(meter_id)` | Retrieve usage data |
 | `update_usage(meter_id, units)` | Called by IoT oracle to update consumption |
+| `deactivate_meter(meter_id)` | Admin-only: immediately deactivate a meter |
+
+## Backend API
+
+### Meter Balance
+
+**`GET /api/meters/:id/balance`**
+
+Returns the live balance, usage, and active status for a single meter. Responses are cached for 5 seconds to reduce RPC load. The frontend `UserDashboard` polls this endpoint every 30 seconds.
+
+**Response**
+
+```json
+{
+  "meter_id": "METER1",
+  "balance": 5000000,
+  "units_used": 1200,
+  "active": true
+}
+```
+
+| Status | Description |
+|---|---|
+| 200 | Meter found, returns balance data |
+| 404 | Meter not found |
 
 ## Contract Upgrades
 
