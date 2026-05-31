@@ -490,6 +490,10 @@ impl SolarGridContract {
         let key = DataKey::Meter(meter_id.clone());
         let mut meter = Self::get_meter_or_error(&env, &key)?;
 
+        if !meter.active {
+            panic!("meter is not active");
+        }
+
         // Daily spending limit: reset window if 24 h has elapsed, then enforce cap.
         let now = env.ledger().timestamp();
         if now.saturating_sub(meter.day_start) > SECONDS_PER_DAY {
@@ -991,6 +995,22 @@ mod tests {
         let meter = client.get_meter(&meter_id);
         assert_eq!(meter.units_used, 110);
         assert!(!meter.active);
+    }
+
+    #[test]
+    #[should_panic(expected = "meter is not active")]
+    fn test_update_usage_panics_if_meter_inactive() {
+        let (env, client, _admin, token_address) = setup_with_token();
+        let token_admin_client = token::StellarAssetClient::new(&env, &token_address);
+        setup_oracle(&env, &client);
+
+        let user = Address::generate(&env);
+        let meter_id = symbol_short!("INACT");
+
+        allowlist_and_register(&client, &meter_id, &user);
+        
+        // Meter is registered but no payment made, so it's inactive
+        client.update_usage(&meter_id, &50_u64, &100_000_i128);
     }
 
     #[test]
