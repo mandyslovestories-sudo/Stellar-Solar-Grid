@@ -433,6 +433,24 @@ impl SolarGridContract {
         Ok(())
     }
 
+    pub fn admin_withdraw(env: Env, admin: Address, amount: i128) {
+        admin.require_auth();
+        // Verify admin matches stored admin address
+        let stored_admin: Address = env.storage().instance().get(&symbol_short!("ADMIN")).expect("admin not set");
+        if admin != stored_admin {
+            panic!("unauthorized");
+        }
+        // Transfer XLM from contract to admin
+        let token_address = Self::get_token_address(&env).expect("token not set");
+        let token_client = token::Client::new(&env, &token_address);
+        let contract_balance = token_client.balance(&env.current_contract_address());
+        if amount > contract_balance {
+            panic!("insufficient balance");
+        }
+        token_client.transfer(&env.current_contract_address(), &admin, &amount);
+        env.events().publish(("admin", "withdraw"), (admin.clone(), amount));
+    }
+
     /// Get currently tracked provider revenue balance.
     pub fn get_provider_revenue(env: Env, provider: Address) -> Result<i128, ContractError> {
         Self::require_initialized(&env)?;
@@ -1180,6 +1198,40 @@ mod tests {
             client.try_withdraw_revenue(&admin, &1_i128),
             Err(Ok(ContractError::InsufficientBalance))
         );
+    }
+
+    #[test]
+    fn test_admin_withdraw_authorized() {
+        let (env, client, admin, token_address) = setup_with_token();
+        let token_admin_client = token::StellarAssetClient::new(&env, &token_address);
+        let token_client = token::Client::new(&env, &token_address);
+        
+        token_admin_client.mint(&client.address, &1000_i128);
+        client.admin_withdraw(&admin, &500_i128);
+        
+        assert_eq!(token_client.balance(&admin), 500_i128);
+        assert_eq!(token_client.balance(&client.address), 500_i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "unauthorized")]
+    fn test_admin_withdraw_unauthorized() {
+        let (env, client, _admin, token_address) = setup_with_token();
+        let token_admin_client = token::StellarAssetClient::new(&env, &token_address);
+        
+        token_admin_client.mint(&client.address, &1000_i128);
+        let fake_admin = Address::generate(&env);
+        client.admin_withdraw(&fake_admin, &500_i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "insufficient balance")]
+    fn test_admin_withdraw_insufficient_balance() {
+        let (env, client, admin, token_address) = setup_with_token();
+        let token_admin_client = token::StellarAssetClient::new(&env, &token_address);
+        
+        token_admin_client.mint(&client.address, &500_i128);
+        client.admin_withdraw(&admin, &1000_i128);
     }
 
     #[test]
