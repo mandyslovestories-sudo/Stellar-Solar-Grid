@@ -101,7 +101,7 @@ impl SolarGridContract {
 
         // meter_registered
         env.events().publish(
-            (symbol_short!("mtr_reg"), EVT_NS, meter_id),
+            (EVT_NS, symbol_short!("mtr_reg"), meter_id),
             owner,
         );
     }
@@ -203,12 +203,12 @@ impl SolarGridContract {
 
         // payment_received
         env.events().publish(
-            (symbol_short!("pmt_rcvd"), EVT_NS, meter_id.clone()),
+            (EVT_NS, symbol_short!("payment"), meter_id.clone()),
             (payer, token_address, amount, plan),
         );
         // meter_activated — payment always activates the meter
         env.events().publish(
-            (symbol_short!("mtr_actv"), EVT_NS, meter_id),
+            (EVT_NS, symbol_short!("mtr_actv"), meter_id),
             (),
         );
     }
@@ -239,7 +239,7 @@ impl SolarGridContract {
         token_client.transfer(&env.current_contract_address(), &provider, &amount);
 
         env.events().publish(
-            (symbol_short!("rev_wdrl"), EVT_NS, provider),
+            (EVT_NS, symbol_short!("rev_wdrl"), provider),
             (token_address, amount),
         );
     }
@@ -281,13 +281,13 @@ impl SolarGridContract {
 
         // usage_updated
         env.events().publish(
-            (symbol_short!("usg_upd"), EVT_NS, meter_id.clone()),
+            (EVT_NS, symbol_short!("usg_upd"), meter_id.clone()),
             (units, cost),
         );
         // meter_deactivated — only when balance drained to zero
         if deactivated {
             env.events().publish(
-                (symbol_short!("mtr_deact"), EVT_NS, meter_id),
+                (EVT_NS, symbol_short!("mtr_deact"), meter_id),
                 (),
             );
         }
@@ -313,12 +313,12 @@ impl SolarGridContract {
 
         if active {
             env.events().publish(
-                (symbol_short!("mtr_actv"), EVT_NS, meter_id),
+                (EVT_NS, symbol_short!("mtr_actv"), meter_id),
                 (),
             );
         } else {
             env.events().publish(
-                (symbol_short!("mtr_deact"), EVT_NS, meter_id),
+                (EVT_NS, symbol_short!("mtr_deact"), meter_id),
                 (),
             );
         }
@@ -698,8 +698,8 @@ mod tests {
         let events = env.events().all();
         let found = events.iter().any(|(_, topics, _)| {
             topics.len() >= 2
-                && topics.get(0) == Some(symbol_short!("mtr_reg").into())
-                && topics.get(1) == Some(EVT_NS.into())
+                && topics.get(0) == Some(EVT_NS.into())
+                && topics.get(1) == Some(symbol_short!("mtr_reg").into())
         });
         assert!(found, "mtr_reg event not emitted");
     }
@@ -717,12 +717,14 @@ mod tests {
 
         let events = env.events().all();
         let has_pmt = events.iter().any(|(_, topics, _)| {
-            topics.get(0) == Some(symbol_short!("pmt_rcvd").into())
+            topics.get(0) == Some(EVT_NS.into())
+                && topics.get(1) == Some(symbol_short!("payment").into())
         });
         let has_actv = events.iter().any(|(_, topics, _)| {
-            topics.get(0) == Some(symbol_short!("mtr_actv").into())
+            topics.get(0) == Some(EVT_NS.into())
+                && topics.get(1) == Some(symbol_short!("mtr_actv").into())
         });
-        assert!(has_pmt, "pmt_rcvd event not emitted");
+        assert!(has_pmt, "payment event not emitted");
         assert!(has_actv, "mtr_actv event not emitted");
     }
 
@@ -742,10 +744,12 @@ mod tests {
 
         let events = env.events().all();
         let has_usg = events.iter().any(|(_, topics, _)| {
-            topics.get(0) == Some(symbol_short!("usg_upd").into())
+            topics.get(0) == Some(EVT_NS.into())
+                && topics.get(1) == Some(symbol_short!("usg_upd").into())
         });
         let has_deact = events.iter().any(|(_, topics, _)| {
-            topics.get(0) == Some(symbol_short!("mtr_deact").into())
+            topics.get(0) == Some(EVT_NS.into())
+                && topics.get(1) == Some(symbol_short!("mtr_deact").into())
         });
         assert!(has_usg, "usg_upd event not emitted");
         assert!(has_deact, "mtr_deact event not emitted on balance drain");
@@ -766,7 +770,8 @@ mod tests {
 
         let events = env.events().all();
         let has_deact = events.iter().any(|(_, topics, _)| {
-            topics.get(0) == Some(symbol_short!("mtr_deact").into())
+            topics.get(0) == Some(EVT_NS.into())
+                && topics.get(1) == Some(symbol_short!("mtr_deact").into())
         });
         assert!(has_deact, "mtr_deact event not emitted by set_active(false)");
     }
