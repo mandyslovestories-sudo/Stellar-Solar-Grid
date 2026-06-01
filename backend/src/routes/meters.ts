@@ -241,5 +241,3 @@ export function createMeterRouter(stellar: StellarService) {
   return meterRouter;
 }
 
-// Default export for back-compat with index.ts
-export const meterRouter = createMeterRouter(stellarService);
