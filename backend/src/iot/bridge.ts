@@ -210,6 +210,55 @@ function startMqttBridge() {
   client.on("message", async (topic, payload) => {
     mqttMessages.inc();
     try {
+      const meterId = topic.split("/")[2];
+
+      let raw: unknown;
+      try {
+        raw = JSON.parse(payload.toString());
+      } catch (err) {
+        logger.error("Invalid MQTT payload (not JSON)", { topic, err });
+        return;
+      }
+
+      const parsed = UsageUpdateSchema.safeParse(raw);
+      if (!parsed.success) {
+        logger.error("Invalid MQTT payload (schema validation failed)", {
+          topic,
+          errors: parsed.error.flatten().fieldErrors,
+        });
+        return;
+      }
+      const { units, cost } = parsed.data;
+
+      logger.info("Usage update received from IoT bridge", {
+        meterId,
+        units,
+        cost,
+      });
+
+      const event = await persistAndSubmitUsageEvent({
+        meterId,
+        units,
+        cost,
+        sourceTopic: topic,
+      });
+
+      if (event.on_chain_tx_hash) {
+        logger.info("Usage recorded on-chain", {
+          meterId,
+          eventId: event.id,
+          txHash: event.on_chain_tx_hash,
+        });
+        // Check if balance is low after usage update
+        checkAndNotifyLowBalance(meterId).catch(err => {
+          logger.error("Low balance check failed", { err });
+        });
+      } else {
+        logger.warn("Usage event queued for retry", {
+          meterId,
+          eventId: event.id,
+        });
+      }
       await processMqttMessage(topic as string, payload as Buffer);
     } catch (err) {
       // Catch any unexpected errors from processing to ensure the bridge keeps running
