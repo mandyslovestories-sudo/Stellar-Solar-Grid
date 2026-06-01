@@ -143,6 +143,51 @@ export async function persistAndSubmitUsageEvent(input: CreateUsageEventInput) {
   return getUsageEventById(event.id)!;
 }
 
+/**
+ * Insert a batch of usage events and mark them as submitted with a tx hash.
+ * This is used by the IoT bridge when it submits a batched update on-chain so
+ * each event is persisted locally with the on-chain tx hash.
+ */
+export function insertSubmittedUsageEvents(
+  readings: Array<{ meterId: string; units: number; cost: number; sourceTopic?: string | null }>,
+  txHash: string,
+) {
+  const now = new Date().toISOString();
+  const stmt = db.prepare(
+    `
+      INSERT INTO usage_events (
+        meter_id,
+        units,
+        cost,
+        received_at,
+        source_topic,
+        status,
+        attempt_count,
+        last_attempt_at,
+        on_chain_tx_hash,
+        submitted_at
+      ) VALUES (?, ?, ?, ?, ?, 'submitted', 1, ?, ?, ?)
+    `,
+  );
+
+  const insert = db.transaction((rows: Array<{ meterId: string; units: number; cost: number; sourceTopic?: string | null }>) => {
+    for (const r of rows) {
+      stmt.run(
+        r.meterId,
+        r.units,
+        String(r.cost),
+        now,
+        r.sourceTopic ?? null,
+        now,
+        txHash,
+        now,
+      );
+    }
+  });
+
+  insert(readings);
+}
+
 export function startUsageEventRetryWorker() {
   if (retryTimer) {
     return;

@@ -8,13 +8,55 @@ Stellar SolarGrid is a decentralized PAYG solar energy platform built on [Soroba
 
 ## Architecture
 
+```mermaid
+graph TD
+    subgraph IoT
+        Meter["IoT Smart Meter"]
+    end
+
+    subgraph Messaging
+        Broker["Mosquitto MQTT Broker"]
+    end
+
+    subgraph Backend Services
+        Bridge["IoT Bridge"]
+        Backend["Express Backend REST API"]
+    end
+
+    subgraph Blockchain
+        Contract["Soroban Smart Contract"]
+    end
+
+    subgraph Client
+        Frontend["React Frontend"]
+    end
+
+    subgraph External
+        Provider["Energy Provider"]
+    end
+
+    Meter -- "1. Sends usage payloads (MQTT)" --> Broker
+    Broker -- "2. Consumes usage payloads" --> Bridge
+    Bridge -- "3. Calls batch_update_usage" --> Contract
+    Contract -- "4. Emits meter:activated/deactivated events" --> Bridge
+    Bridge -- "5. Sends ON/OFF relay commands" --> Meter
+    Frontend -- "Calls contract directly" --> Contract
+    Frontend -- "Queries REST API" --> Backend
+    Backend -- "Fires webhook notifications" --> Provider
 ```
-stellar-solar-grid/
-├── contracts/        # Soroban smart contracts (Rust)
-├── frontend/         # React + TypeScript user/provider dashboards
-├── backend/          # Node.js API + IoT smart meter bridge
-└── README.md
-```
+
+### System Flows
+
+#### 1. PAYG (Pay-As-You-Go) Flow
+Users purchase energy access through flexible payment plans (daily, weekly, or usage-based stablecoin payments) via the React Frontend dashboard, which interacts directly with the Soroban smart contract. The contract verifies the payment, activates the user's meter, and tracks the remaining energy units or time validity.
+
+#### 2. Batch Update Flow
+Rather than updating every usage update individually, the IoT Bridge consumes MQTT payloads sent by active smart meters to the Mosquitto broker, aggregates them, and calls `batch_update_usage` on the Soroban smart contract in a single batch transaction. This saves gas and transaction fees on the Stellar network.
+
+#### 3. Allowlist Flow
+To prevent unauthorized usage reports or unauthorized meter controls, an Allowlist checks and verifies that only registered smart meters (registered via the admin CLI/dashboard) can be active on the system. Additionally, the IoT Bridge/Oracle address is allowlisted on the smart contract to restrict usage updates to trusted nodes.
+
+For local development setup and contributing guidelines, please refer to the [Contributing Guide](file:///Users/backenddevopsdeveloper/Downloads/DRIPS/viv-Stellar-Solar-Grid/CONTRIBUTING.md).
 
 ## Core Features
 
@@ -61,6 +103,22 @@ npm run dev
 ```
 
 The backend stores IoT usage events in a local SQLite database at `backend/data/usage-events.sqlite` by default. Set `USAGE_EVENTS_DB_PATH` to override the file location.
+
+### Running with Docker Compose
+
+You can spin up the infrastructure (MQTT broker and the backend service) using Docker Compose:
+
+1. Copy the environment template at the repository root:
+   ```bash
+   cp .env.example .env
+   ```
+2. Populate the `.env` file with your `CONTRACT_ID`, `ADMIN_SECRET_KEY`, and `VITE_CONTRACT_ID`.
+3. Start the services:
+   ```bash
+   docker compose up --build
+   ```
+
+The `env-check` service validates that all required environment variables are correctly populated before the backend starts up, preventing silent configuration errors.
 
 ## Smart Contract Overview
 

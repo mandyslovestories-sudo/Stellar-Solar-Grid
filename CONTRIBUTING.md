@@ -28,7 +28,13 @@ Thanks for your interest in contributing! This guide covers everything you need 
    git remote add upstream https://github.com/ORIGINAL_OWNER/Stellar-Solar-Grid.git
    ```
 
-3. Create a feature branch off `main`:
+3. Create a feature branch off `main` using the following branch naming conventions:
+   - `feat/` for new features (e.g. `feat/add-payment-flow`)
+   - `fix/` for bug fixes (e.g. `fix/meter-validation`)
+   - `refactor/` for code restructuring (e.g. `refactor/api-routes`)
+   - `docs/` for documentation updates (e.g. `docs/api-guide`)
+   - `infra/` for build scripts, Docker, or CI/CD updates (e.g. `infra/docker-setup`)
+
    ```bash
    git checkout -b feat/your-feature-name
    ```
@@ -50,48 +56,66 @@ Stellar-Solar-Grid/
 
 ### Prerequisites
 
-| Tool | Version |
-|------|---------|
-| Node.js | >= 18 |
-| Rust | stable (via [rustup](https://rustup.rs/)) |
-| Stellar CLI | latest |
-| Freighter Wallet | browser extension |
+Make sure you have the following installed on your local machine:
+- **Node.js**: version 20
+- **Rust**: stable version (via [rustup](https://rustup.rs/))
+- **wasm32-unknown-unknown target**: installed via `rustup target add wasm32-unknown-unknown`
+- **Stellar CLI**: latest version (for deploying and invoking contracts)
+- **Docker & Docker Compose**: for running containerized infrastructure (MQTT, checks, etc.)
 
-Add the WASM target once after installing Rust:
+### Smart Contract Development
+
+We use `make` for common development workflows. You can run these commands from the project root or the `contracts` directory:
+
+- **Build the contract:**
+  ```bash
+  make build
+  ```
+- **Run all contract tests:**
+  ```bash
+  make test
+  ```
+- **Deploy the contract to testnet:**
+  ```bash
+  make deploy
+  ```
+
+### Local Setup Steps
+
+#### Frontend Setup
+1. Navigate to the `frontend` directory:
+   ```bash
+   cd frontend
+   ```
+2. Copy the example environment file and configure it:
+   ```bash
+   cp .env.example .env.local
+   ```
+3. Install dependencies and start the Vite dev server:
+   ```bash
+   npm install
+   npm run dev
+   ```
+
+#### Backend Setup
+1. Navigate to the `backend` directory:
+   ```bash
+   cd backend
+   ```
+2. Copy the example environment file and configure it:
+   ```bash
+   cp .env.example .env
+   ```
+3. Install dependencies and start the Express server:
+   ```bash
+   npm install
+   npm run dev
+   ```
+
+### Running the Full Stack with Docker
+You can spin up the full stack using docker compose:
 ```bash
-rustup target add wasm32-unknown-unknown
-```
-
-### Smart Contracts
-
-```bash
-cd contracts
-cargo build --target wasm32-unknown-unknown --release
-```
-
-Deploy to testnet:
-```bash
-stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/solar_grid.wasm \
-  --network testnet
-```
-
-### Frontend
-
-```bash
-cd frontend
-cp .env.example .env        # fill in your contract ID and network
-npm install
-npm run dev
-```
-
-### Backend
-
-```bash
-cd backend
-cp .env.example .env        # fill in your Stellar keys and MQTT config
-npm install
-npm run dev
+docker compose up --build
 ```
 
 ---
@@ -169,7 +193,16 @@ npm run test:watch    # Run tests in watch mode
 ### General
 
 - No commented-out dead code in PRs.
-- Keep commits atomic and write meaningful commit messages using [Conventional Commits](https://www.conventionalcommits.org/):
+- Keep commits atomic and write meaningful commit messages using the [Conventional Commits](https://www.conventionalcommits.org/) format:
+  - `feat(...)`: A new feature (e.g., `feat(infra): add docker-compose validation`)
+  - `fix(...)`: A bug fix (e.g., `fix(api): handle connection timeout`)
+  - `docs(...)`: Documentation changes
+  - `style(...)`: Formatting, semi-colons, etc.
+  - `refactor(...)`: Restructuring code without changing behavior
+  - `test(...)`: Adding or modifying tests
+  - `infra(...)` / `chore(...)`: Infrastructure or dependency updates
+  
+  Example commit messages:
   ```
   feat: add weekly payment plan support
   fix: correct meter access check logic
@@ -263,10 +296,10 @@ npm run test:watch    # Run tests in watch mode
 
 ### PR Checklist
 
-- [ ] Code builds without errors or warnings
-- [ ] Existing functionality is not broken
-- [ ] New logic is reasonably self-documenting or commented
-- [ ] PR description explains the *why*, not just the *what*
+- [ ] Build passes (contracts, frontend, backend)
+- [ ] Lint passes successfully without warnings
+- [ ] Tests are added or updated for new changes
+- [ ] README is updated if any new environment variables or setup steps are introduced
 
 ---
 
