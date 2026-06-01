@@ -7,6 +7,7 @@ import {
 } from "../lib/usageEvents.js";
 import { asyncHandler } from "../lib/asyncHandler.js";
 import { validateRequest, RegisterMeterSchema } from "../lib/validation.js";
+import { requireAdminKey } from "../middleware/adminAuth.js";
 
 const balanceCache = new Map<string, { data: any; ts: number }>();
 const BALANCE_CACHE_TTL_MS = 5_000; // 5-second cache to reduce RPC load
@@ -62,6 +63,7 @@ export function createMeterRouter(stellar: StellarService) {
   /** POST /api/meters/:id/deactivate — admin manually deactivates a meter */
   meterRouter.post(
     "/:id/deactivate",
+    requireAdminKey,
     asyncHandler(async (req, res) => {
       const meterId = req.params.id;
 
@@ -146,6 +148,7 @@ export function createMeterRouter(stellar: StellarService) {
   /** POST /api/meters — register a new meter (admin only) */
   meterRouter.post(
     "/",
+    requireAdminKey,
     validateRequest({ body: RegisterMeterSchema }),
     asyncHandler(async (req, res) => {
       const { meter_id, owner } = req.body;
@@ -159,7 +162,7 @@ export function createMeterRouter(stellar: StellarService) {
   );
 
   /** POST /api/meters/:id/usage — IoT oracle reports usage */
-  meterRouter.post("/:id/usage", async (req, res) => {
+  meterRouter.post("/:id/usage", requireAdminKey, async (req, res) => {
     const { units, cost } = req.body as { units: unknown; cost: unknown };
 
     if (units == null || cost == null) {

@@ -10,7 +10,7 @@
 
 import mqtt from "mqtt";
 import { logger } from "../lib/logger.js";
-import { persistAndSubmitUsageEvent, insertSubmittedUsageEvents } from "../lib/usageEvents.js";
+import { persistAndSubmitUsageEvent, insertSubmittedUsageEvents, getKV, setKV } from "../lib/usageEvents.js";
 import { UsageUpdateSchema } from "../lib/validation.js";
 import {
   adminInvoke,
@@ -23,6 +23,9 @@ import { mqttMessages } from "../lib/metrics.js";
 
 const BROKER = process.env.MQTT_BROKER ?? "mqtt://localhost:1883";
 const TOPIC = "solargrid/meters/+/usage";
+const MAX_REPLAY_LEDGERS = Number(process.env.MAX_REPLAY_LEDGERS ?? 1000);
+
+let mqttClient: mqtt.MqttClient | null = null;
 const FLUSH_INTERVAL_MS = Number(process.env.BATCH_FLUSH_MS ?? 5_000);
 const EVENT_POLL_INTERVAL_MS = Number(
   process.env.EVENT_POLL_INTERVAL_MS ?? 5_000,
@@ -92,10 +95,11 @@ export function startIoTBridge() {
 }
 
 function startMqttBridge() {
-  const client = mqtt.connect(BROKER, {
+  mqttClient = mqtt.connect(BROKER, {
     reconnectPeriod: 1000,       // start at 1s
     connectTimeout: 10_000,
   });
+  const client = mqttClient;
 
   const MAX_RECONNECT_ATTEMPTS = Number(process.env.MQTT_MAX_RECONNECT_ATTEMPTS ?? 10);
   let reconnectAttempts = 0;
@@ -212,7 +216,8 @@ function startMqttBridge() {
 // ── Contract event listener ───────────────────────────────────────────────────
 
 // Track the latest ledger sequence we've processed to avoid re-processing events
-let lastProcessedLedger = 0;
+const saved = getKV('last_ledger');
+let lastProcessedLedger = saved ? Number(saved) : 0;
 
 function startContractEventListener() {
   logger.info("Contract event listener started");
@@ -227,13 +232,22 @@ async function pollContractEvents() {
     if (lastProcessedLedger === 0) {
       // On first run, start from current ledger — don't replay history
       lastProcessedLedger = currentLedger;
+      setKV('last_ledger', String(currentLedger));
       return;
     }
 
     if (currentLedger <= lastProcessedLedger) return;
 
+    // Cap replay to avoid excessive RPC calls after long downtime
+    const startLedger = Math.max(lastProcessedLedger + 1, currentLedger - MAX_REPLAY_LEDGERS);
+    if (startLedger > lastProcessedLedger + 1) {
+      logger.warn({ skippedFrom: lastProcessedLedger + 1, resumeAt: startLedger }, 'Replay capped at MAX_REPLAY_LEDGERS');
+    }
+
+    logger.info({ from: startLedger, to: currentLedger }, 'Replaying events from ledger');
+
     const response = await server.getEvents({
-      startLedger: lastProcessedLedger + 1,
+      startLedger,
       filters: [
         {
           type: "contract",
@@ -248,6 +262,7 @@ async function pollContractEvents() {
     }
 
     lastProcessedLedger = currentLedger;
+    setKV('last_ledger', String(currentLedger));
   } catch (err) {
     logger.error("Contract event poll error", { err });
   }
@@ -321,13 +336,21 @@ async function onPaymentReceived(meterId: string, amountStroops: number) {
 }
 
 async function onMeterActivated(meterId: string) {
-  // Send ON signal to the physical smart meter via MQTT or HTTP
-  logger.info("Sending ON signal to meter", { meterId });
-  // e.g. mqttClient.publish(`solargrid/meters/${meterId}/control`, JSON.stringify({ cmd: "ON" }));
+  logger.info({ meterId }, 'Sending ON signal to meter relay');
+  mqttClient?.publish(
+    `solargrid/meters/${meterId}/control`,
+    JSON.stringify({ cmd: 'ON', timestamp: new Date().toISOString() }),
+    { qos: 1 },
+    (err) => { if (err) logger.error({ meterId, err }, 'Failed to publish ON command'); },
+  );
 }
 
 async function onMeterDeactivated(meterId: string) {
-  // Send OFF signal to the physical smart meter via MQTT or HTTP
-  logger.info("Sending OFF signal to meter", { meterId });
-  // e.g. mqttClient.publish(`solargrid/meters/${meterId}/control`, JSON.stringify({ cmd: "OFF" }));
+  logger.info({ meterId }, 'Sending OFF signal to meter relay');
+  mqttClient?.publish(
+    `solargrid/meters/${meterId}/control`,
+    JSON.stringify({ cmd: 'OFF', timestamp: new Date().toISOString() }),
+    { qos: 1 },
+    (err) => { if (err) logger.error({ meterId, err }, 'Failed to publish OFF command'); },
+  );
 }
