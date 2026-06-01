@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import timeout from "connect-timeout";
 import { NextFunction, Request, Response } from "express";
+import cors from "cors";
 import mqtt from "mqtt";
 import { stellarService, server } from "./lib/stellar.js";
 import { createMeterRouter } from "./routes/meters.js";
@@ -40,11 +41,13 @@ app.use(
     },
   }),
 );
-app.use((_, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  next();
-});
+const corsOptions = {
+  origin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions), (_req, res) => res.sendStatus(204));
 
 // Request timeout — configurable via REQUEST_TIMEOUT env var (default 15s)
 const requestTimeout = process.env.REQUEST_TIMEOUT ?? '15s';
