@@ -7,7 +7,7 @@ import { stellarService, server } from "./lib/stellar.js";
 import { createMeterRouter } from "./routes/meters.js";
 import { paymentsRouter } from "./routes/payments.js";
 import { webhookRouter } from "./routes/webhooks.js";
-import { statsRouter } from "./routes/stats.js";
+import { allowlistRouter } from "./routes/allowlist.js";
 import { startIoTBridge } from "./iot/bridge.js";
 import { logger } from "./lib/logger.js";
 import {
@@ -43,7 +43,7 @@ app.use(
 );
 app.use((_, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Admin-Key");
   next();
 });
 
@@ -64,7 +64,7 @@ app.use((req, _res, next) => {
 app.use("/api/meters", createMeterRouter(stellarService));
 app.use("/api/payments", paymentsRouter);
 app.use("/api/webhooks", webhookRouter);
-app.use("/api/stats", statsRouter);
+app.use("/api/allowlist", allowlistRouter);
 
 app.get('/health', async (_req, res) => {
   const checks: Record<string, string> = {};
