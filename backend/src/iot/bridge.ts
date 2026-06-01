@@ -10,7 +10,7 @@
 
 import mqtt from "mqtt";
 import { logger } from "../lib/logger.js";
-import { persistAndSubmitUsageEvent } from "../lib/usageEvents.js";
+import { persistAndSubmitUsageEvent, insertSubmittedUsageEvents } from "../lib/usageEvents.js";
 import { UsageUpdateSchema } from "../lib/validation.js";
 import {
   adminInvoke,
@@ -123,6 +123,16 @@ function startMqttBridge() {
         encodeBatch(batch),
       ]);
       logger.info(`Batch recorded on-chain: ${hash}`);
+
+      // Persist each reading locally with the on-chain tx hash for historical reporting
+      try {
+        insertSubmittedUsageEvents(
+          batch.map((b) => ({ meterId: b.meterId, units: b.units, cost: b.cost, sourceTopic: null })),
+          hash,
+        );
+      } catch (err) {
+        logger.error("Failed to persist batch usage events to local DB", { err });
+      }
     } catch (err) {
       logger.error("Batch submission error", { err });
     }
