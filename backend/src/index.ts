@@ -1,5 +1,7 @@
 import "dotenv/config";
 import express from "express";
+import cors from "cors";
+import { meterRouter } from "./routes/meters.js";
 import timeout from "connect-timeout";
 import { NextFunction, Request, Response } from "express";
 import cors from "cors";
@@ -11,6 +13,7 @@ import { webhookRouter } from "./routes/webhooks.js";
 import { allowlistRouter } from "./routes/allowlist.js";
 import { startIoTBridge } from "./iot/bridge.js";
 import { logger } from "./lib/logger.js";
+import requestLogger from "./middleware/requestLogger.js";
 import { register } from "./lib/metrics.js";
 import {
   initUsageEventStore,
@@ -32,8 +35,28 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
-const app = express();
+const REQUIRED_ENV = ["CONTRACT_ID", "ADMIN_SECRET_KEY"];
 const PORT = process.env.PORT ?? 3001;
+
+const missing = REQUIRED_ENV.filter((k) => !process.env[k]);
+if (missing.length > 0) {
+  logger.fatal(
+    { missing },
+    "Missing required environment variables. Copy backend/.env.example to backend/.env."
+  );
+  process.exit(1);
+}
+
+const app = express();
+
+app.use(
+  cors({
+    origin: process.env.FRONTEND_ORIGIN ?? "*",
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Admin-Key"],
+    optionsSuccessStatus: 204,
+  })
+);
 
 // Capture raw body for webhook signature verification before JSON parsing
 app.use(
@@ -43,6 +66,8 @@ app.use(
     },
   }),
 );
+
+app.use(requestLogger);
 app.use((_, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Admin-Key");
@@ -151,6 +176,10 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 app.listen(PORT, () => {
+  logger.info(
+    { port: PORT, network: process.env.STELLAR_NETWORK ?? "testnet" },
+    "SolarGrid backend started"
+  );
   initUsageEventStore();
   startUsageEventRetryWorker();
   logger.info("SolarGrid backend listening", { port: PORT });

@@ -58,6 +58,10 @@ paymentsRouter.get(
       payments: paginated,
       pagination: { page, limit, total, pages: Math.ceil(total / limit) },
     });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message ?? "Failed to fetch payment history" });
+  }
+});
   }),
 );
 
@@ -68,8 +72,10 @@ async function fetchPaymentEvents(
   sort: "asc" | "desc",
 ): Promise<PaymentRecord[]> {
   // Query Soroban RPC for contract events
-  const now = Math.floor(Date.now() / 1000);
-  // Soroban events are keyed by ledger sequence; use a wide window (last ~30 days)
+  // Events follow (EVT_NS, action, subject) pattern; filter on namespace + action
+  const EVT_NS = StellarSdk.xdr.ScVal.scvSymbol("solargrid").toXDR("base64");
+  const ACTION = StellarSdk.xdr.ScVal.scvSymbol("payment").toXDR("base64");
+
   const response = await (server as any).getEvents({
     startLedger: 1,
     filters: [
@@ -77,8 +83,8 @@ async function fetchPaymentEvents(
         type: "contract",
         contractIds: [CONTRACT_ID],
         topics: [
-          // topic[0] = "payment" symbol (emitted by make_payment)
-          [StellarSdk.xdr.ScVal.scvSymbol("payment").toXDR("base64")],
+          // topics[0] = EVT_NS ("solargrid"), topics[1] = action ("payment")
+          [EVT_NS, ACTION],
         ],
       },
     ],
@@ -110,13 +116,15 @@ function parsePaymentEvent(
   filterAddress: string,
 ): PaymentRecord | null {
   // Contract events emitted by make_payment have topics:
-  // ("payment", meter_id, payer) and data: (amount, plan)
+  // (EVT_NS, "payment", meter_id) and data: (payer, token_address, amount, plan)
   const topics: StellarSdk.xdr.ScVal[] = (event.topic ?? []).map((t: string) =>
     StellarSdk.xdr.ScVal.fromXDR(t, "base64"),
   );
 
   if (topics.length < 3) return null;
 
+  // topics[0] = namespace, topics[1] = action, topics[2] = meter_id (subject)
+  const meterVal = topics[2];
   const payerVal = topics[2];
   const payer =
     payerVal.switch().name === "scvAddress"
@@ -133,23 +141,32 @@ function parsePaymentEvent(
       ? meterVal.sym().toString()
       : "unknown";
 
-  // data is [amount_i128, plan_map]
+  // data is (payer, token_address, amount, plan)
   const dataXdr = event.value ?? event.data;
   let amountXlm = 0;
   let plan = "Unknown";
+  let payer: string | null = null;
 
   if (dataXdr) {
     try {
       const dataVal = StellarSdk.xdr.ScVal.fromXDR(dataXdr, "base64");
-      const native = StellarSdk.scValToNative(dataVal);
-      if (Array.isArray(native) && native.length >= 2) {
-        amountXlm = Number(native[0]) / 10_000_000;
-        plan = Object.keys(native[1])[0] ?? "Unknown";
+      const native = StellarSdk.scValToNative(dataVal) as any[];
+      if (Array.isArray(native) && native.length >= 4) {
+        // data[0] = payer address, data[2] = amount, data[3] = plan
+        const payerNative = native[0];
+        payer =
+          typeof payerNative === "string"
+            ? payerNative
+            : payerNative?.toString() ?? null;
+        amountXlm = Number(native[2]) / 10_000_000;
+        plan = Object.keys(native[3])[0] ?? "Unknown";
       }
     } catch {
       // leave defaults
     }
   }
+
+  if (!payer || payer !== filterAddress) return null;
 
   // Ledger close time from event
   const date = event.ledgerClosedAt

@@ -235,6 +235,10 @@ impl SolarGridContract {
         env.storage().instance().set(&METER_LIST, &global_list);
 
         // meter_registered
+        env.events().publish(
+            (EVT_NS, symbol_short!("mtr_reg"), meter_id),
+            owner,
+        );
         env.events().publish(("meter", "registered"), (meter_id.clone(), owner.clone()));
         Ok(())
     }
@@ -373,11 +377,16 @@ impl SolarGridContract {
             .set(&provider_key, &provider_revenue.saturating_add(amount));
 
         // payment_received
+        env.events().publish(
+            (EVT_NS, symbol_short!("payment"), meter_id.clone()),
+            (payer, token_address, amount, plan),
+        );
+        // meter_activated — payment always activates the meter
         // payment_received
         env.events().publish(("meter", "payment"), (meter_id.clone(), amount, plan));
         // meter_activated
         env.events().publish(
-            (symbol_short!("mtr_actv"), EVT_NS, meter_id),
+            (EVT_NS, symbol_short!("mtr_actv"), meter_id),
             (),
         );
         Ok(())
@@ -423,7 +432,7 @@ impl SolarGridContract {
         token_client.transfer(&env.current_contract_address(), &provider, &amount);
 
         env.events().publish(
-            (symbol_short!("rev_wdrl"), EVT_NS, provider),
+            (EVT_NS, symbol_short!("rev_wdrl"), provider),
             (token_address, amount),
         );
         Ok(())
@@ -497,12 +506,16 @@ impl SolarGridContract {
         env.storage().persistent().set(&key, &meter);
 
         // usage_updated
+        env.events().publish(
+            (EVT_NS, symbol_short!("usg_upd"), meter_id.clone()),
+            (units, cost),
+        );
         // usage_updated
         env.events().publish(("meter", "usage"), (meter_id.clone(), units, cost));
         // meter_deactivated — only when balance drained to zero
         if deactivated {
             env.events().publish(
-                (symbol_short!("mtr_deact"), EVT_NS, meter_id),
+                (EVT_NS, symbol_short!("mtr_deact"), meter_id),
                 (),
             );
         }
@@ -555,6 +568,7 @@ impl SolarGridContract {
 
         if active {
             env.events().publish(
+                (EVT_NS, symbol_short!("mtr_actv"), meter_id),
                 (symbol_short!("access"), meter_id.clone()),
                 true,
             );
@@ -564,6 +578,7 @@ impl SolarGridContract {
             );
         } else {
             env.events().publish(
+                (EVT_NS, symbol_short!("mtr_deact"), meter_id),
                 (symbol_short!("access"), meter_id.clone()),
                 false,
             );
@@ -1313,6 +1328,8 @@ mod tests {
         let events = env.events().all();
         let found = events.iter().any(|(_, topics, _)| {
             topics.len() >= 2
+                && topics.get(0) == Some(EVT_NS.into())
+                && topics.get(1) == Some(symbol_short!("mtr_reg").into())
                 && topics.get(0).map(|v| sym_eq(&env, &v, Symbol::new(&env, "meter"))).unwrap_or(false)
                 && topics.get(1).map(|v| sym_eq(&env, &v, Symbol::new(&env, "registered"))).unwrap_or(false)
         });
@@ -1332,6 +1349,12 @@ mod tests {
 
         let events = env.events().all();
         let has_pmt = events.iter().any(|(_, topics, _)| {
+            topics.get(0) == Some(EVT_NS.into())
+                && topics.get(1) == Some(symbol_short!("payment").into())
+        });
+        let has_actv = events.iter().any(|(_, topics, _)| {
+            topics.get(0) == Some(EVT_NS.into())
+                && topics.get(1) == Some(symbol_short!("mtr_actv").into())
             topics.get(0).map(|v| sym_eq(&env, &v, Symbol::new(&env, "meter"))).unwrap_or(false)
                 && topics.get(1).map(|v| sym_eq(&env, &v, Symbol::new(&env, "payment"))).unwrap_or(false)
         });
@@ -1358,6 +1381,12 @@ mod tests {
 
         let events = env.events().all();
         let has_usg = events.iter().any(|(_, topics, _)| {
+            topics.get(0) == Some(EVT_NS.into())
+                && topics.get(1) == Some(symbol_short!("usg_upd").into())
+        });
+        let has_deact = events.iter().any(|(_, topics, _)| {
+            topics.get(0) == Some(EVT_NS.into())
+                && topics.get(1) == Some(symbol_short!("mtr_deact").into())
             topics.get(0).map(|v| sym_eq(&env, &v, Symbol::new(&env, "meter"))).unwrap_or(false)
                 && topics.get(1).map(|v| sym_eq(&env, &v, Symbol::new(&env, "usage"))).unwrap_or(false)
         });
@@ -1383,6 +1412,8 @@ mod tests {
 
         let events = env.events().all();
         let has_deact = events.iter().any(|(_, topics, _)| {
+            topics.get(0) == Some(EVT_NS.into())
+                && topics.get(1) == Some(symbol_short!("mtr_deact").into())
             topics.get(0).map(|v| sym_eq(&env, &v, symbol_short!("mtr_deact"))).unwrap_or(false)
         });
         assert!(has_deact, "mtr_deact event not emitted by set_active(false)");
