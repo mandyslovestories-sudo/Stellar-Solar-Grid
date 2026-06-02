@@ -1,15 +1,20 @@
 import "dotenv/config";
 import express from "express";
-import rateLimit from "express-rate-limit";
+import cors from "cors";
+import { meterRouter } from "./routes/meters.js";
 import timeout from "connect-timeout";
 import { NextFunction, Request, Response } from "express";
+import cors from "cors";
 import mqtt from "mqtt";
 import { stellarService, server } from "./lib/stellar.js";
 import { createMeterRouter } from "./routes/meters.js";
 import { paymentsRouter } from "./routes/payments.js";
 import { webhookRouter } from "./routes/webhooks.js";
+import { allowlistRouter } from "./routes/allowlist.js";
 import { startIoTBridge } from "./iot/bridge.js";
 import { logger } from "./lib/logger.js";
+import requestLogger from "./middleware/requestLogger.js";
+import { register } from "./lib/metrics.js";
 import {
   initUsageEventStore,
   startUsageEventRetryWorker,
@@ -25,13 +30,33 @@ const REQUIRED_ENV = [
 
 const missing = REQUIRED_ENV.filter(k => !process.env[k]);
 if (missing.length > 0) {
-  console.error('Missing required environment variables:', missing.join(', '));
-  console.error('Copy backend/.env.example to backend/.env and fill in the values.');
+  logger.error('Missing required environment variables: ' + missing.join(', '));
+  logger.error('Copy backend/.env.example to backend/.env and fill in the values.');
+  process.exit(1);
+}
+
+const REQUIRED_ENV = ["CONTRACT_ID", "ADMIN_SECRET_KEY"];
+const PORT = process.env.PORT ?? 3001;
+
+const missing = REQUIRED_ENV.filter((k) => !process.env[k]);
+if (missing.length > 0) {
+  logger.fatal(
+    { missing },
+    "Missing required environment variables. Copy backend/.env.example to backend/.env."
+  );
   process.exit(1);
 }
 
 const app = express();
-const PORT = process.env.PORT ?? 3001;
+
+app.use(
+  cors({
+    origin: process.env.FRONTEND_ORIGIN ?? "*",
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Admin-Key"],
+    optionsSuccessStatus: 204,
+  })
+);
 
 // Capture raw body for webhook signature verification before JSON parsing
 app.use(
@@ -41,9 +66,11 @@ app.use(
     },
   }),
 );
+
+app.use(requestLogger);
 app.use((_, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Admin-Key");
   next();
 });
 
@@ -96,6 +123,7 @@ app.use((req, _res, next) => {
 app.use("/api/meters", createMeterRouter(stellarService));
 app.use("/api/payments", paymentsLimiter, paymentsRouter);
 app.use("/api/webhooks", webhookRouter);
+app.use("/api/allowlist", allowlistRouter);
 
 app.get('/health', async (_req, res) => {
   const checks: Record<string, string> = {};
@@ -180,8 +208,14 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 app.listen(PORT, () => {
+  logger.info(
+    { port: PORT, network: process.env.STELLAR_NETWORK ?? "testnet" },
+    "SolarGrid backend started"
+  );
   initUsageEventStore();
   startUsageEventRetryWorker();
   logger.info("SolarGrid backend listening", { port: PORT });
-  startIoTBridge();
+  startIoTBridge().catch(err => {
+    logger.error("Failed to start IoT bridge", { err });
+  });
 });
