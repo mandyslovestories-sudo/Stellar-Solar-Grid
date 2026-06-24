@@ -36,6 +36,7 @@ const ORACLE: Symbol = symbol_short!("ORACLE");
 const METER_LIST: Symbol = symbol_short!("MLIST");
 const COLLABS: Symbol = symbol_short!("COLLABS");
 const SHARES: Symbol = symbol_short!("SHARES");
+const PENDING_ADMIN: Symbol = symbol_short!("PADMIN");
 const SECONDS_PER_DAY: u64 = 86_400;
 const SECONDS_PER_WEEK: u64 = 604_800;
 
@@ -683,6 +684,29 @@ impl SolarGridContract {
             result.set(collaborator, payout);
         }
         Ok(result)
+    }
+
+    /// Propose a new admin address. Current admin only.
+    /// The transfer is completed only when the new address calls accept_admin.
+    pub fn propose_admin(env: Env, new_admin: Address) -> Result<(), ContractError> {
+        Self::require_admin(&env)?;
+        env.storage().instance().set(&PENDING_ADMIN, &new_admin);
+        env.events().publish((EVT_NS, symbol_short!("adm_prop")), new_admin);
+        Ok(())
+    }
+
+    /// Accept an in-flight admin transfer. Must be called by the pending admin.
+    pub fn accept_admin(env: Env) -> Result<(), ContractError> {
+        let pending: Address = env
+            .storage()
+            .instance()
+            .get(&PENDING_ADMIN)
+            .ok_or(ContractError::Unauthorized)?;
+        pending.require_auth();
+        env.storage().instance().set(&ADMIN, &pending);
+        env.storage().instance().remove(&PENDING_ADMIN);
+        env.events().publish((EVT_NS, symbol_short!("adm_set")), pending);
+        Ok(())
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
