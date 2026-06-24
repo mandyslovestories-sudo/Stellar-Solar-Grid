@@ -823,8 +823,13 @@ impl SolarGridContract {
         }
         let key = DataKey::Meter(meter_id.clone());
         let mut meter = Self::get_meter_or_error(&env, &key)?;
+        let old_limit = meter.daily_limit;
         meter.daily_limit = limit;
         env.storage().persistent().set(&key, &meter);
+        env.events().publish(
+            (EVT_NS, symbol_short!("lmt_set"), meter_id),
+            (old_limit, limit),
+        );
         Ok(())
     }
 
