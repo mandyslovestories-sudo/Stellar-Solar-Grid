@@ -3,6 +3,7 @@ import express from "express";
 import { meterRouter } from "./routes/meters.js";
 import { paymentsRouter } from "./routes/payments.js";
 import { webhookRouter } from "./routes/webhooks.js";
+import { allowlistRouter } from "./routes/allowlist.js";
 import { startIoTBridge } from "./iot/bridge.js";
 
 const app = express();
@@ -25,6 +26,7 @@ app.use((_, res, next) => {
 app.use("/api/meters", meterRouter);
 app.use("/api/payments", paymentsRouter);
 app.use("/api/webhooks", webhookRouter);
+app.use("/api/allowlist", allowlistRouter);
 
 app.get("/health", (_, res) => res.json({ status: "ok" }));
 
