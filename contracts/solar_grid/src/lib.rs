@@ -686,6 +686,74 @@ impl SolarGridContract {
         Ok(result)
     }
 
+    /// Register up to 50 meters in a single transaction.
+    /// Skips meters whose owner is not allowlisted or that already exist,
+    /// emitting a reg_skip event for each. Updates OwnerMeters and METER_LIST indexes.
+    pub fn batch_register_meters(
+        env: Env,
+        meters: Vec<(String, Address)>,
+    ) -> Result<(), ContractError> {
+        Self::require_admin(&env)?;
+        if meters.len() > 50 {
+            return Err(ContractError::BatchTooLarge);
+        }
+        let allowlist = Self::get_allowlist(env.clone())?;
+        for (meter_id, owner) in meters.iter() {
+            if !allowlist.contains(&owner) {
+                env.events().publish(
+                    (EVT_NS, symbol_short!("reg_skip"), meter_id.clone()),
+                    owner.clone(),
+                );
+                continue;
+            }
+            let key = DataKey::Meter(meter_id.clone());
+            if env.storage().persistent().has(&key) {
+                env.events().publish(
+                    (EVT_NS, symbol_short!("reg_skip"), meter_id.clone()),
+                    owner.clone(),
+                );
+                continue;
+            }
+            let now = env.ledger().timestamp();
+            let meter = Meter {
+                version: 2,
+                owner: owner.clone(),
+                active: false,
+                units_used: 0,
+                plan: PaymentPlan::Daily,
+                last_payment: now,
+                expires_at: now,
+                daily_limit: 0,
+                day_spent: 0,
+                day_start: now,
+            };
+            env.storage().persistent().set(&key, &meter);
+
+            let owner_key = DataKey::OwnerMeters(owner.clone());
+            let mut list: Vec<String> = env
+                .storage()
+                .persistent()
+                .get(&owner_key)
+                .unwrap_or_else(|| vec![&env]);
+            list.push_back(meter_id.clone());
+            env.storage().persistent().set(&owner_key, &list);
+
+            let mut global_list: Vec<String> = env
+                .storage()
+                .instance()
+                .get(&METER_LIST)
+                .unwrap_or_else(|| vec![&env]);
+            global_list.push_back(meter_id.clone());
+            env.storage().instance().set(&METER_LIST, &global_list);
+
+            env.events().publish(
+                (EVT_NS, symbol_short!("mtr_reg"), meter_id.clone()),
+                owner.clone(),
+            );
+        }
+        Ok(())
+    }
+
     /// Propose a new admin address. Current admin only.
     /// The transfer is completed only when the new address calls accept_admin.
     pub fn propose_admin(env: Env, new_admin: Address) -> Result<(), ContractError> {
