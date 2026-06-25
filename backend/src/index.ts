@@ -1,4 +1,4 @@
-import "dotenv/config";
+﻿import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import timeout from "connect-timeout";
@@ -12,6 +12,7 @@ import { allowlistRouter } from "./routes/allowlist.js";
 import { collaboratorRouter } from "./routes/collaborators.js";
 import { statsRouter } from "./routes/stats.js";
 import { startIoTBridge } from "./iot/bridge.js";
+import { requestLogger } from "./middleware/index.js";
 import { logger } from "./lib/logger.js";
 import requestLogger from "./middleware/requestLogger.js";
 import { register } from "./lib/metrics.js";
@@ -25,6 +26,11 @@ import { register } from "./lib/metrics.js";
 const REQUIRED_ENV = ["CONTRACT_ID", "ADMIN_SECRET_KEY", "STELLAR_RPC_URL", "MQTT_BROKER"];
 const PORT = process.env.PORT ?? 3001;
 
+app.use(express.json());
+app.use(requestLogger);
+app.use((_, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 const missing = REQUIRED_ENV.filter((k) => !process.env[k]);
 if (missing.length > 0) {
   logger.fatal(
@@ -160,6 +166,8 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 app.listen(PORT, () => {
+  console.log(`SolarGrid backend running on port ${PORT}`);
+  startIoTBridge();
   logger.info(
     { port: PORT, network: process.env.STELLAR_NETWORK ?? "testnet" },
     "SolarGrid backend started"
