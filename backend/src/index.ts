@@ -19,6 +19,8 @@ import {
   initUsageEventStore,
   startUsageEventRetryWorker,
 } from "./lib/usageEvents.js";
+import { logger } from "./lib/logger.js";
+import { register } from "./lib/metrics.js";
 
 const REQUIRED_ENV = ["CONTRACT_ID", "ADMIN_SECRET_KEY", "STELLAR_RPC_URL", "MQTT_BROKER"];
 const PORT = process.env.PORT ?? 3001;
