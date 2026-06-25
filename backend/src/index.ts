@@ -30,15 +30,6 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
-const missing = REQUIRED_ENV.filter((k) => !process.env[k]);
-if (missing.length > 0) {
-  logger.fatal(
-    { missing },
-    "Missing required environment variables. Copy backend/.env.example to backend/.env."
-  );
-  process.exit(1);
-}
-
 const app = express();
 
 app.use(
@@ -170,7 +161,9 @@ app.listen(PORT, () => {
   initUsageEventStore();
   startUsageEventRetryWorker();
   logger.info("SolarGrid backend listening", { port: PORT });
-  startIoTBridge().catch(err => {
+  try {
+    startIoTBridge();
+  } catch (err) {
     logger.error("Failed to start IoT bridge", { err });
-  });
+  }
 });
