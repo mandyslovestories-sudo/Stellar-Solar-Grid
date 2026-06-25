@@ -1,6 +1,6 @@
 import { Router } from "express";
 import * as StellarSdk from "@stellar/stellar-sdk";
-import { contractQuery } from "../lib/stellar.js";
+import { contractQuery, adminInvoke } from "../lib/stellar.js";
 
 export const collaboratorRouter = Router();
 
@@ -44,7 +44,6 @@ collaboratorRouter.post("/", async (req, res) => {
   }
 
   try {
-    const { adminInvoke } = await import("../lib/stellar.js");
     const hash = await adminInvoke("add_collaborator", [
       StellarSdk.nativeToScVal(address, { type: "address" }),
       StellarSdk.nativeToScVal(basis_points, { type: "u32" }),
