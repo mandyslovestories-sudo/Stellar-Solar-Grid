@@ -1,5 +1,4 @@
-"use client";
-
+﻿
 import { create } from "zustand";
 import { StellarWalletsKit, WalletNetwork, FREIGHTER_ID } from "@creit.tech/stellar-wallets-kit";
 
@@ -48,3 +47,4 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     return signedTxXdr;
   },
 }));
+
