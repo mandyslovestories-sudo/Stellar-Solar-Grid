@@ -637,11 +637,8 @@ impl SolarGridContract {
         let key = DataKey::Meter(meter_id.clone());
         let mut meter = Self::get_meter_or_error(&env, &key)?;
 
-        if !meter.active {
-            return Err(ContractError::MeterNotActive);
-        }
-
         // Daily spending limit: reset window if 24 h has elapsed, then enforce cap.
+        // Active check is performed inside apply_usage.
         let now = env.ledger().timestamp();
         let deactivated = Self::apply_usage(&env, &meter_id, &mut meter, units, cost, now)?;
         env.storage().persistent().set(&key, &meter);
@@ -967,6 +964,11 @@ impl SolarGridContract {
         cost: i128,
         now: u64,
     ) -> Result<bool, ContractError> {
+        // Reject usage updates for inactive meters
+        if !meter.active {
+            return Err(ContractError::MeterNotActive);
+        }
+
         if now.saturating_sub(meter.day_start) > SECONDS_PER_DAY {
             meter.day_spent = 0;
             meter.day_start = now;
@@ -2358,6 +2360,106 @@ mod tests {
         client.update_usage(&meter_id, &1_u64, &40_000_i128);
         client.update_usage(&meter_id, &1_u64, &40_000_i128);
         assert_eq!(client.get_meter_balance(&meter_id), 20_000);
+    }
+
+    // ── Bug fix: apply_usage active check tests ────────────────────────────────
+
+    /// Test that update_usage rejects usage on deactivated meters.
+    /// Reproduces the bug: deactivate meter → update_usage → expect MeterNotActive error.
+    #[test]
+    fn test_update_usage_rejects_deactivated_meter() {
+        let (env, client, _admin, token_address) = setup_with_token();
+        let token_admin_client = token::StellarAssetClient::new(&env, &token_address);
+        setup_oracle(&env, &client);
+
+        let user = Address::generate(&env);
+        let meter_id = symbol_short!("UA_DEACT");
+        allowlist_and_register(&client, &meter_id, &user);
+        token_admin_client.mint(&user, &10_000_i128);
+        client.make_payment(&meter_id, &user, &10_000_i128, &PaymentPlan::UsageBased);
+
+        // Meter is now active
+        assert!(client.check_access(&meter_id));
+
+        // Deactivate the meter
+        client.deactivate_meter(&meter_id);
+        assert!(!client.check_access(&meter_id));
+
+        // Try to update usage on deactivated meter — should fail with MeterNotActive
+        let result = client.try_update_usage(&meter_id, &1_u64, &100_i128);
+        assert_eq!(result, Err(Ok(ContractError::MeterNotActive)));
+
+        // Verify units_used and balance were not modified
+        assert_eq!(client.get_meter(&meter_id).units_used, 0);
+        assert_eq!(client.get_meter_balance(&meter_id), 10_000);
+    }
+
+    /// Test that batch_update_usage rejects usage on deactivated meters.
+    /// Ensures the fix applies to both update_usage and batch_update_usage.
+    #[test]
+    fn test_batch_update_usage_rejects_deactivated_meter() {
+        let (env, client, _admin, token_address) = setup_with_token();
+        let token_admin_client = token::StellarAssetClient::new(&env, &token_address);
+        setup_oracle(&env, &client);
+
+        let user1 = Address::generate(&env);
+        let meter_id1 = String::from_slice(&env, "BM1".as_bytes());
+        allowlist_and_register(&client, &meter_id1, &user1);
+        token_admin_client.mint(&user1, &10_000_i128);
+        client.make_payment(&meter_id1, &user1, &10_000_i128, &PaymentPlan::UsageBased);
+
+        let user2 = Address::generate(&env);
+        let meter_id2 = String::from_slice(&env, "BM2".as_bytes());
+        allowlist_and_register(&client, &meter_id2, &user2);
+        token_admin_client.mint(&user2, &10_000_i128);
+        client.make_payment(&meter_id2, &user2, &10_000_i128, &PaymentPlan::UsageBased);
+
+        // Deactivate the first meter
+        client.deactivate_meter(&meter_id1);
+
+        // Batch update: meter1 (inactive) and meter2 (active)
+        let updates = vec![
+            (meter_id1.clone(), 1_u64, 500_i128),
+            (meter_id2.clone(), 1_u64, 500_i128),
+        ];
+        client.batch_update_usage(&updates);
+
+        // Meter 1 (deactivated) should not have consumed resources
+        assert_eq!(client.get_meter(&meter_id1).units_used, 0);
+        assert_eq!(client.get_meter_balance(&meter_id1), 10_000);
+
+        // Meter 2 (active) should have consumed resources normally
+        assert_eq!(client.get_meter(&meter_id2).units_used, 1);
+        assert_eq!(client.get_meter_balance(&meter_id2), 9_500);
+    }
+
+    /// Test that administratively deactivated meter cannot consume daily limit.
+    /// Ensures daily_limit is not consumed for inactive meters.
+    #[test]
+    fn test_deactivated_meter_does_not_consume_daily_limit() {
+        let (env, client, _admin, token_address) = setup_with_token();
+        let token_admin_client = token::StellarAssetClient::new(&env, &token_address);
+        setup_oracle(&env, &client);
+
+        let user = Address::generate(&env);
+        let meter_id = symbol_short!("DL_DEACT");
+        allowlist_and_register(&client, &meter_id, &user);
+        token_admin_client.mint(&user, &10_000_i128);
+        client.make_payment(&meter_id, &user, &10_000_i128, &PaymentPlan::UsageBased);
+
+        // Set a daily limit
+        client.set_daily_limit(&meter_id, &500_i128);
+
+        // Deactivate the meter
+        client.deactivate_meter(&meter_id);
+
+        // Try to update usage — should be rejected by active check, not daily limit
+        let result = client.try_update_usage(&meter_id, &1_u64, &100_i128);
+        assert_eq!(result, Err(Ok(ContractError::MeterNotActive)));
+
+        // Verify day_spent was not incremented
+        let meter = client.get_meter(&meter_id);
+        assert_eq!(meter.day_spent, 0);
     }
 
     /// set_daily_limit with negative value returns InvalidAmount.
