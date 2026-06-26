@@ -1,10 +1,38 @@
 import { Router } from "express";
 import * as StellarSdk from "@stellar/stellar-sdk";
-import { server, CONTRACT_ID, NETWORK_PASSPHRASE } from "../lib/stellar.js";
+import { z } from "zod";
+import { server, CONTRACT_ID, NETWORK_PASSPHRASE, adminInvoke } from "../lib/stellar.js";
 import { logger } from "../lib/logger.js";
 import { asyncHandler } from "../lib/asyncHandler.js";
 
 export const paymentsRouter = Router();
+
+const PaymentSchema = z.object({
+  meterId: z.string().min(1).max(64),
+  amount: z.number().int().positive(),
+  payer: z.string().length(56),
+});
+
+paymentsRouter.post(
+  "/",
+  asyncHandler(async (req, res) => {
+    const parsed = PaymentSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: "Invalid request",
+        code: "VALIDATION_ERROR",
+        details: parsed.error.flatten(),
+      });
+    }
+    const { meterId, amount, payer } = parsed.data;
+    const hash = await adminInvoke("make_payment", [
+      StellarSdk.nativeToScVal(meterId, { type: "symbol" }),
+      StellarSdk.nativeToScVal(BigInt(amount), { type: "i128" }),
+      StellarSdk.nativeToScVal(payer, { type: "address" }),
+    ]);
+    return res.json({ hash });
+  }),
+);
 
 const HORIZON_URL =
   NETWORK_PASSPHRASE === StellarSdk.Networks.PUBLIC

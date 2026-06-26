@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express from "express";
+import cors from "cors";
 import timeout from "connect-timeout";
 import { NextFunction, Request, Response } from "express";
 import mqtt from "mqtt";
@@ -7,8 +8,10 @@ import { stellarService, server } from "./lib/stellar.js";
 import { createMeterRouter } from "./routes/meters.js";
 import { paymentsRouter } from "./routes/payments.js";
 import { webhookRouter } from "./routes/webhooks.js";
+import { allowlistRouter } from "./routes/allowlist.js";
 import { startIoTBridge } from "./iot/bridge.js";
 import { logger } from "./lib/logger.js";
+import { writeLimiter, readLimiter } from "./middleware/rateLimit.js";
 import {
   initUsageEventStore,
   startUsageEventRetryWorker,
@@ -32,6 +35,21 @@ if (missing.length > 0) {
 const app = express();
 const PORT = process.env.PORT ?? 3001;
 
+const allowedOrigins = (process.env.CORS_ORIGIN ?? '*').split(',').map(o => o.trim());
+
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Origin ${origin} not allowed by CORS`));
+    }
+  },
+  credentials: true,
+}));
+
+app.use(readLimiter);
+
 // Capture raw body for webhook signature verification before JSON parsing
 app.use(
   express.json({
@@ -40,11 +58,6 @@ app.use(
     },
   }),
 );
-app.use((_, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  next();
-});
 
 // Request timeout — configurable via REQUEST_TIMEOUT env var (default 15s)
 const requestTimeout = process.env.REQUEST_TIMEOUT ?? '15s';
@@ -61,8 +74,9 @@ app.use((req, _res, next) => {
 });
 
 app.use("/api/meters", createMeterRouter(stellarService));
-app.use("/api/payments", paymentsRouter);
-app.use("/api/webhooks", webhookRouter);
+app.use("/api/payments", writeLimiter, paymentsRouter);
+app.use("/api/webhooks", writeLimiter, webhookRouter);
+app.use("/api/allowlist", writeLimiter, allowlistRouter);
 
 app.get('/health', async (_req, res) => {
   const checks: Record<string, string> = {};
