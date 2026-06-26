@@ -1,25 +1,194 @@
 import "dotenv/config";
-import express from "express";
-import { meterRouter } from "./routes/meters.js";
+import express, { NextFunction, Request, Response } from "express";
+import cors from "cors";
+import timeout from "connect-timeout";
+import mqtt from "mqtt";
+import helmet from "helmet";
+import swaggerUi from "swagger-ui-express";
+import YAML from "yamljs";
+import { stellarService, server } from "./lib/stellar.js";
+import { createMeterRouter } from "./routes/meters.js";
 import { paymentsRouter } from "./routes/payments.js";
+import { webhookRouter } from "./routes/webhooks.js";
+import { allowlistRouter } from "./routes/allowlist.js";
+import { collaboratorRouter } from "./routes/collaborators.js";
+import { statsRouter } from "./routes/stats.js";
 import { startIoTBridge } from "./iot/bridge.js";
+import { logger } from "./lib/logger.js";
+import { register } from "./lib/metrics.js";
+import {
+  initUsageEventStore,
+  startUsageEventRetryWorker,
+} from "./lib/usageEvents.js";
+import { metricsRouter } from "./routes/metrics.js";
+import { createRequire } from "module";
+
+const _require = createRequire(import.meta.url);
+const { version } = _require("../../package.json") as { version: string };
+
+const REQUIRED_ENV = ["CONTRACT_ID", "ADMIN_SECRET_KEY", "STELLAR_RPC_URL", "MQTT_BROKER"];
+const missing = REQUIRED_ENV.filter((k) => !process.env[k]);
+if (missing.length > 0) {
+  logger.fatal(
+    { missing },
+    "Missing required environment variables. Copy backend/.env.example to backend/.env."
+  );
+  process.exit(1);
+}
+
+const PORT = process.env.PORT ?? 3001;
+// #423: configurable body size limit
+const BODY_LIMIT = process.env.REQUEST_BODY_LIMIT ?? "100kb";
 
 const app = express();
-const PORT = process.env.PORT ?? 3001;
+const startTime = Date.now();
 
-app.use(express.json());
-app.use((_, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'none'"],
+      scriptSrc: ["'self'"],
+      connectSrc: ["'self'"],
+    },
+  },
+  hsts: { maxAge: 31536000, includeSubDomains: true },
+}));
+
+app.use(
+  cors({
+    origin: process.env.FRONTEND_ORIGIN ?? "*",
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Admin-Key"],
+    optionsSuccessStatus: 204,
+  })
+);
+
+// Capture raw body for webhook signature verification before JSON parsing.
+// #423: apply body size limit
+app.use(
+  express.json({
+    limit: BODY_LIMIT,
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf;
+    },
+  }),
+);
+app.use(express.urlencoded({ extended: true, limit: BODY_LIMIT }));
+
+app.use(sanitiseBody);
+app.use(requestLoggerMiddleware);
+
+// Request timeout — configurable via REQUEST_TIMEOUT env var (default 15s)
+const requestTimeout = process.env.REQUEST_TIMEOUT ?? "15s";
+app.use(timeout(requestTimeout));
+
+app.use((req: any, _res: any, next: any) => {
+  if (!req.timedout) next();
+});
+
+app.use((req, _res, next) => {
+  logger.info({ method: req.method, path: req.path });
   next();
 });
 
-app.use("/api/meters", meterRouter);
-app.use("/api/payments", paymentsRouter);
+// ── Routes ────────────────────────────────────────────────────────────────────
 
-app.get("/health", (_, res) => res.json({ status: "ok" }));
+app.use("/api/meters", createMeterRouter(stellarService));
+app.use("/api/payments", paymentsRouter);
+app.use("/api/webhooks", webhookRouter);
+app.use("/api/allowlist", allowlistRouter);
+app.use("/api/collaborators", collaboratorRouter);
+app.use("/api/stats", statsRouter);
+app.use("/api/metrics", metricsRouter);
+
+// #420: GET /api/health — version, uptime, dependency status
+app.get("/api/health", async (_req, res) => {
+  const uptimeSec = Math.floor((Date.now() - startTime) / 1000);
+
+  // Check Stellar RPC
+  let rpcOk = false;
+  try {
+    await server.getLatestLedger();
+    rpcOk = true;
+  } catch {
+    logger.warn("Stellar RPC health check failed");
+  }
+
+  // Check MQTT
+  const broker = process.env.MQTT_BROKER ?? "mqtt://localhost:1883";
+  let mqttOk = false;
+  try {
+    const client = mqtt.connect(broker, { reconnectPeriod: 0, connectTimeout: 3000 });
+    mqttOk = await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => { client.end(true); resolve(false); }, 3000);
+      client.once("connect", () => { clearTimeout(timer); client.end(true); resolve(true); });
+      client.once("error", () => { clearTimeout(timer); client.end(true); resolve(false); });
+    });
+  } catch {
+    logger.warn("MQTT health check failed");
+  }
+
+  const healthy = rpcOk && mqttOk;
+  res.status(healthy ? 200 : 503).json({
+    status: healthy ? "ok" : "degraded",
+    version,
+    uptimeSec,
+    dependencies: {
+      stellarRpc: rpcOk ? "ok" : "unreachable",
+      mqtt: mqttOk ? "ok" : "unreachable",
+    },
+  });
+});
+
+app.get("/metrics", async (_req, res) => {
+  res.set("Content-Type", register.contentType);
+  res.end(await register.metrics());
+});
+
+// #418: 404 catch-all — must come after all routes
+app.use((_req: Request, res: Response) => {
+  res.status(404).json({
+    error: "Route not found",
+    code: "NOT_FOUND",
+    hint: "Check /api/docs for available endpoints",
+  });
+});
+
+// Timeout error handler
+app.use((err: any, req: any, res: any, next: any) => {
+  if (req.timedout) {
+    logger.error("Request timed out", { method: req.method, path: req.path });
+    return res.status(504).json({ error: "Request timed out", code: "TIMEOUT" });
+  }
+  next(err);
+});
+
+// #423: 413 payload too large handler + global error handler (#418)
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  logger.error({ error: err.message, stack: err.stack }, "Unhandled error");
+
+  if (err.type === "entity.too.large") {
+    return res.status(413).json({ error: "Request body too large", code: "PAYLOAD_TOO_LARGE" });
+  }
+  if (err.type === "entity.parse.failed" || (err instanceof SyntaxError && err.body !== undefined)) {
+    return res.status(400).json({ error: "Invalid JSON body", code: "INVALID_JSON" });
+  }
+  if ((err as any).status === 404) {
+    return res.status(404).json({ error: "Resource not found", code: "NOT_FOUND" });
+  }
+  if ((err as any).code === "VALIDATION_ERROR" && (err as any).details) {
+    return res.status(400).json({ error: "Validation failed", code: "VALIDATION_ERROR", details: (err as any).details });
+  }
+  res.status(500).json({ error: err.message || "Internal server error", code: "INTERNAL_ERROR" });
+});
 
 app.listen(PORT, () => {
-  console.log(`🌞 SolarGrid backend running on port ${PORT}`);
-  startIoTBridge();
+  logger.info({ port: PORT, network: process.env.STELLAR_NETWORK ?? "testnet" }, "SolarGrid backend started");
+  initUsageEventStore();
+  startUsageEventRetryWorker();
+  try {
+    startIoTBridge();
+  } catch (err) {
+    logger.error("Failed to start IoT bridge", { err });
+  }
 });
