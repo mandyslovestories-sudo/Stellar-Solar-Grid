@@ -3,6 +3,9 @@ import express, { NextFunction, Request, Response } from "express";
 import cors from "cors";
 import timeout from "connect-timeout";
 import mqtt from "mqtt";
+import helmet from "helmet";
+import swaggerUi from "swagger-ui-express";
+import YAML from "yamljs";
 import { stellarService, server } from "./lib/stellar.js";
 import { createMeterRouter } from "./routes/meters.js";
 import { paymentsRouter } from "./routes/payments.js";
@@ -11,7 +14,6 @@ import { allowlistRouter } from "./routes/allowlist.js";
 import { collaboratorRouter } from "./routes/collaborators.js";
 import { statsRouter } from "./routes/stats.js";
 import { startIoTBridge } from "./iot/bridge.js";
-import { requestLogger } from "./middleware/index.js";
 import { logger } from "./lib/logger.js";
 import { register } from "./lib/metrics.js";
 import {
@@ -41,6 +43,17 @@ const BODY_LIMIT = process.env.REQUEST_BODY_LIMIT ?? "100kb";
 const app = express();
 const startTime = Date.now();
 
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'none'"],
+      scriptSrc: ["'self'"],
+      connectSrc: ["'self'"],
+    },
+  },
+  hsts: { maxAge: 31536000, includeSubDomains: true },
+}));
+
 app.use(
   cors({
     origin: process.env.FRONTEND_ORIGIN ?? "*",
@@ -62,7 +75,8 @@ app.use(
 );
 app.use(express.urlencoded({ extended: true, limit: BODY_LIMIT }));
 
-app.use(requestLogger);
+app.use(sanitiseBody);
+app.use(requestLoggerMiddleware);
 
 // Request timeout — configurable via REQUEST_TIMEOUT env var (default 15s)
 const requestTimeout = process.env.REQUEST_TIMEOUT ?? "15s";
