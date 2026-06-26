@@ -25,7 +25,7 @@ export default function PayPage() {
   const [message, setMessage] = useState("");
   const [txHash, setTxHash] = useState("");
 
-  const EXPLORER_BASE = process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE?.includes("Test")
+  const EXPLORER_BASE = import.meta.env.VITE_NETWORK_PASSPHRASE?.includes("Test")
     ? "https://stellar.expert/explorer/testnet/tx"
     : "https://stellar.expert/explorer/public/tx";
 

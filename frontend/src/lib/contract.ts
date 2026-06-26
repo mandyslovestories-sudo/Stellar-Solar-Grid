@@ -1,9 +1,10 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { useWalletStore } from "@/store/walletStore";
 
-const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL!;
-const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID!;
-const NETWORK_PASSPHRASE = process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE!;
+const RPC_URL = import.meta.env.VITE_RPC_URL ?? 'https://soroban-testnet.stellar.org';
+const CONTRACT_ID = import.meta.env.VITE_CONTRACT_ID as string;
+const NETWORK_PASSPHRASE =
+  import.meta.env.VITE_NETWORK_PASSPHRASE ?? 'Test SDF Network ; September 2015';
 
 const server = new StellarSdk.SorobanRpc.Server(RPC_URL);
 
