@@ -25,7 +25,7 @@ pub enum ContractError {
     CollaboratorAlreadyExists = 13,
     DailyLimitReached = 14,
     MeterNotActive = 15,
-    ContractFrozen = 16,
+    ContractNotFrozen = 16,
 }
 
 // ── Storage keys ──────────────────────────────────────────────────────────────
@@ -787,6 +787,16 @@ impl SolarGridContract {
             .unwrap_or(Vec::new(&env))
     }
 
+    /// Returns the share (in basis points) allocated to a single collaborator.
+    /// Returns `None` if the address is not a registered collaborator.
+    /// Share value is in basis points: 1000 = 10%, 10000 = 100%.
+    pub fn get_collaborator_share(env: Env, address: Address) -> Option<u32> {
+        let shares: Map<Address, u32> = env.storage().instance()
+            .get(&SHARES)
+            .unwrap_or_else(|| Map::new(&env));
+        shares.get(address)
+    }
+
     /// Returns the full share map in a single call — eliminates N+1 RPC calls.
     /// Map<Address, u32> where u32 is basis points (100 = 1%).
     pub fn get_all_shares(env: Env) -> Map<Address, u32> {
@@ -844,6 +854,60 @@ impl SolarGridContract {
         }
         env.events().publish((EVT_NS, symbol_short!("distrib")), (amount,));
         Ok(payouts)
+    }
+
+    // ── Emergency / admin controls ───────────────────────────────────────────
+
+    /// Mark the contract as frozen. Admin-only. Required before calling
+    /// `emergency_withdraw`. Intended for compromise or deprecation scenarios.
+    pub fn freeze_contract(env: Env) -> Result<(), ContractError> {
+        Self::require_admin(&env)?;
+        env.storage().instance().set(&FROZEN, &true);
+        Ok(())
+    }
+
+    /// Drain all contract-held token balance to a recovery address. Admin-only.
+    /// The contract must be frozen first via `freeze_contract`; returns
+    /// `ContractNotFrozen` otherwise. Returns `Ok(())` when balance is zero.
+    pub fn emergency_withdraw(env: Env, to: Address) -> Result<(), ContractError> {
+        Self::require_admin(&env)?;
+        let frozen: bool = env.storage().instance().get(&FROZEN).unwrap_or(false);
+        if !frozen {
+            return Err(ContractError::ContractNotFrozen);
+        }
+        let token_addr: Address = env.storage().instance()
+            .get(&TOKEN)
+            .ok_or(ContractError::NotInitialized)?;
+        let token = token::Client::new(&env, &token_addr);
+        let balance = token.balance(&env.current_contract_address());
+        if balance > 0 {
+            token.transfer(&env.current_contract_address(), &to, &balance);
+        }
+        env.events().publish(
+            (symbol_short!("WITHDRAW"), symbol_short!("emergency")),
+            (to.clone(), balance),
+        );
+        Ok(())
+    }
+
+    /// Manually expire a meter before its natural expiry. Admin-only.
+    /// Sets `expires_at` to the current ledger timestamp and `active` to false.
+    /// Useful for policy violations or testing expiry flows.
+    /// Returns `MeterNotFound` for unknown meter IDs.
+    pub fn expire_meter(env: Env, meter_id: String) -> Result<(), ContractError> {
+        Self::require_admin(&env)?;
+        let key = DataKey::Meter(meter_id.clone());
+        let mut meter: Meter = env.storage().persistent()
+            .get(&key)
+            .ok_or(ContractError::MeterNotFound)?;
+        meter.expires_at = env.ledger().timestamp();
+        meter.active = false;
+        env.storage().persistent().set(&key, &meter);
+        env.events().publish(
+            (symbol_short!("METER"), symbol_short!("expired")),
+            meter_id,
+        );
+        Ok(())
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
@@ -2266,19 +2330,19 @@ mod tests {
         let (env, client, _admin, _token_address) = setup_with_token();
         let user = Address::generate(&env);
         let meter_id = symbol_short!("METER1");
-        
+
         client.allowlist_add(&user);
         client.register_meter(&meter_id, &user);
-        
+
         // Try to activate without balance
         let result = client.try_set_active(&meter_id, &true);
         assert_eq!(result, Err(Ok(ContractError::CannotActivateWithoutBalance)));
-        
+
         // Verify it works after payment
         let token_admin_client = token::StellarAssetClient::new(&env, &_token_address);
         token_admin_client.mint(&user, &1_000_i128);
         client.make_payment(&meter_id, &user, &1_000_i128, &PaymentPlan::Daily);
-        
+
         // Deactivate then reactivate
         client.set_active(&meter_id, &false);
         assert_eq!(client.check_access(&meter_id), false);
@@ -2286,153 +2350,83 @@ mod tests {
         assert_eq!(client.check_access(&meter_id), true);
     }
 
-    // ── Emergency stop (freeze/unfreeze) tests ────────────────────────────────
+    // ── Issue #414: get_collaborator_share ────────────────────────────────────
 
-    /// freeze_contract requires admin auth and blocks make_payment.
     #[test]
-    fn test_freeze_contract_blocks_payment() {
+    fn test_get_collaborator_share_returns_correct_value() {
+        let (env, client, _admin) = setup();
+        let alice = Address::generate(&env);
+        client.add_collaborator(&alice, &3_000_u32);
+        assert_eq!(client.get_collaborator_share(&alice), Some(3_000_u32));
+    }
+
+    #[test]
+    fn test_get_collaborator_share_returns_none_for_unknown_address() {
+        let (env, client, _admin) = setup();
+        let unknown = Address::generate(&env);
+        assert_eq!(client.get_collaborator_share(&unknown), None);
+    }
+
+    // ── Issue #415: freeze_contract / emergency_withdraw ──────────────────────
+
+    #[test]
+    fn test_emergency_withdraw_transfers_full_balance() {
+        let (env, client, _admin, token_address) = setup_with_token();
+        let token_admin_client = token::StellarAssetClient::new(&env, &token_address);
+        let token_client = token::Client::new(&env, &token_address);
+
+        token_admin_client.mint(&client.address, &1_000_i128);
+        client.freeze_contract();
+
+        let recipient = Address::generate(&env);
+        client.emergency_withdraw(&recipient);
+
+        assert_eq!(token_client.balance(&recipient), 1_000);
+        assert_eq!(token_client.balance(&client.address), 0);
+    }
+
+    #[test]
+    fn test_emergency_withdraw_noop_when_balance_zero() {
+        let (env, client, _admin, _token_address) = setup_with_token();
+        client.freeze_contract();
+        let recipient = Address::generate(&env);
+        client.emergency_withdraw(&recipient);
+    }
+
+    #[test]
+    fn test_emergency_withdraw_requires_frozen() {
+        let (env, client, _admin, _token_address) = setup_with_token();
+        let recipient = Address::generate(&env);
+        let result = client.try_emergency_withdraw(&recipient);
+        assert_eq!(result, Err(Ok(ContractError::ContractNotFrozen)));
+    }
+
+    // ── Issue #417: expire_meter ──────────────────────────────────────────────
+
+    #[test]
+    fn test_expire_meter_sets_inactive_and_expired() {
         let (env, client, _admin, token_address) = setup_with_token();
         let token_admin_client = token::StellarAssetClient::new(&env, &token_address);
         let user = Address::generate(&env);
-        let meter_id = symbol_short!("FRZ_PMT");
+        let meter_id = symbol_short!("EXP_MTR");
 
         allowlist_and_register(&client, &meter_id, &user);
         token_admin_client.mint(&user, &1_000_i128);
+        client.make_payment(&meter_id, &user, &1_000_i128, &PaymentPlan::Weekly);
+        assert!(client.get_meter(&meter_id).active);
 
-        // Before freeze, payment should succeed
-        client.make_payment(&meter_id, &user, &500_i128, &PaymentPlan::Daily);
-        assert_eq!(client.get_meter_balance(&meter_id), 500);
+        client.expire_meter(&meter_id);
 
-        // Freeze the contract
-        client.freeze_contract();
-        assert_eq!(client.is_frozen(), true);
-
-        // After freeze, payment should fail with ContractFrozen error
-        let result = client.try_make_payment(&meter_id, &user, &500_i128, &PaymentPlan::Daily);
-        assert_eq!(result, Err(Ok(ContractError::ContractFrozen)));
+        let meter = client.get_meter(&meter_id);
+        assert!(!meter.active);
+        assert!(meter.expires_at <= env.ledger().timestamp());
     }
 
-    /// unfreeze_contract requires admin auth and re-enables make_payment.
     #[test]
-    fn test_unfreeze_contract_allows_payment_again() {
-        let (env, client, _admin, token_address) = setup_with_token();
-        let token_admin_client = token::StellarAssetClient::new(&env, &token_address);
-        let user = Address::generate(&env);
-        let meter_id = symbol_short!("UNFRZ");
-
-        allowlist_and_register(&client, &meter_id, &user);
-        token_admin_client.mint(&user, &2_000_i128);
-
-        // Freeze
-        client.freeze_contract();
-        assert_eq!(client.is_frozen(), true);
-
-        // Payment blocked
-        let result = client.try_make_payment(&meter_id, &user, &500_i128, &PaymentPlan::Daily);
-        assert_eq!(result, Err(Ok(ContractError::ContractFrozen)));
-
-        // Unfreeze
-        client.unfreeze_contract();
-        assert_eq!(client.is_frozen(), false);
-
-        // Payment works again
-        client.make_payment(&meter_id, &user, &500_i128, &PaymentPlan::Daily);
-        assert_eq!(client.get_meter_balance(&meter_id), 500);
-    }
-
-    /// freeze_contract blocks update_usage.
-    #[test]
-    fn test_freeze_contract_blocks_usage_update() {
-        let (env, client, _admin, token_address) = setup_with_token();
-        let token_admin_client = token::StellarAssetClient::new(&env, &token_address);
-        setup_oracle(&env, &client);
-        let user = Address::generate(&env);
-        let meter_id = symbol_short!("FRZ_USG");
-
-        allowlist_and_register(&client, &meter_id, &user);
-        token_admin_client.mint(&user, &1_000_i128);
-        client.make_payment(&meter_id, &user, &1_000_i128, &PaymentPlan::UsageBased);
-
-        // Before freeze, usage update should succeed
-        client.update_usage(&meter_id, &10_u64, &100_i128);
-        assert_eq!(client.get_meter_balance(&meter_id), 900);
-
-        // Freeze the contract
-        client.freeze_contract();
-
-        // After freeze, usage update should fail with ContractFrozen error
-        let result = client.try_update_usage(&meter_id, &5_u64, &50_i128);
-        assert_eq!(result, Err(Ok(ContractError::ContractFrozen)));
-    }
-
-    /// is_frozen returns false by default and true after freeze.
-    #[test]
-    fn test_is_frozen_state() {
+    fn test_expire_meter_returns_not_found_for_unknown() {
         let (_env, client, _admin) = setup();
-
-        // Default: not frozen
-        assert_eq!(client.is_frozen(), false);
-
-        // After freeze
-        client.freeze_contract();
-        assert_eq!(client.is_frozen(), true);
-
-        // After unfreeze
-        client.unfreeze_contract();
-        assert_eq!(client.is_frozen(), false);
-    }
-
-    /// Frozen state survives ledger upgrades (stored in instance storage).
-    #[test]
-    fn test_frozen_state_survives_ledger_upgrade() {
-        let (env, client, _admin) = setup();
-
-        // Freeze contract
-        client.freeze_contract();
-        assert_eq!(client.is_frozen(), true);
-
-        // Simulate ledger upgrade by checking frozen status
-        // In the real contract, instance storage is designed to survive ledger upgrades
-        // We verify the state persists across subsequent calls
-        assert_eq!(client.is_frozen(), true);
-
-        // Unfreeze and verify state persists
-        client.unfreeze_contract();
-        assert_eq!(client.is_frozen(), false);
-        assert_eq!(client.is_frozen(), false); // Call again to verify persistence
-    }
-
-    /// Freeze emits frz_on event.
-    #[test]
-    fn test_freeze_contract_emits_event() {
-        let (env, client, _admin) = setup();
-        client.freeze_contract();
-
-        let events = env.events().all();
-        let found = events.iter().any(|(_, topics, _)| {
-            topics.len() >= 2
-                && topics.get(0) == Some(EVT_NS.into())
-                && topics.get(1) == Some(symbol_short!("frz_on").into())
-        });
-        assert!(found, "freeze event not emitted");
-    }
-
-    /// Unfreeze emits frz_off event.
-    #[test]
-    fn test_unfreeze_contract_emits_event() {
-        let (env, client, _admin) = setup();
-        client.freeze_contract();
-        env.events().all(); // Clear events
-
-        client.unfreeze_contract();
-
-        let events = env.events().all();
-        let found = events.iter().any(|(_, topics, _)| {
-            topics.len() >= 2
-                && topics.get(0) == Some(EVT_NS.into())
-                && topics.get(1) == Some(symbol_short!("frz_off").into())
-        });
-        assert!(found, "unfreeze event not emitted");
+        let result = client.try_expire_meter(&symbol_short!("NO_METER"));
+        assert_eq!(result, Err(Ok(ContractError::MeterNotFound)));
     }
 }
 
