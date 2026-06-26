@@ -2449,6 +2449,115 @@ mod tests {
         client.set_active(&meter_id, &true);
         assert_eq!(client.check_access(&meter_id), true);
     }
+
+    // ── Issue: Paginated get_all_meters tests ──────────────────────────────────
+
+    /// Test get_all_meters_paginated with multiple pages.
+    /// Creates 150 meters and verifies pagination works correctly.
+    #[test]
+    fn test_get_all_meters_paginated_first_page() {
+        let (env, client, _admin, _token_address) = setup_with_token();
+
+        // Register 150 meters
+        for i in 0..150 {
+            let user = Address::generate(&env);
+            client.allowlist_add(&user);
+            let meter_id = String::from_slice(&env, format!("M{}", i).as_bytes());
+            client.register_meter(&meter_id, &user);
+        }
+
+        // Get first page (offset=0, limit=50)
+        let page = client.get_all_meters_paginated(&0_u32, &50_u32);
+        assert_eq!(page.len(), 50);
+    }
+
+    /// Test get_all_meters_paginated with last page pagination.
+    /// Verifies that the last page returns remaining items.
+    #[test]
+    fn test_get_all_meters_paginated_last_page() {
+        let (env, client, _admin, _token_address) = setup_with_token();
+
+        // Register 150 meters
+        for i in 0..150 {
+            let user = Address::generate(&env);
+            client.allowlist_add(&user);
+            let meter_id = String::from_slice(&env, format!("M{}", i).as_bytes());
+            client.register_meter(&meter_id, &user);
+        }
+
+        // Get last page (offset=100, limit=100)
+        // Should return 50 items (total - offset = 150 - 100)
+        let page = client.get_all_meters_paginated(&100_u32, &100_u32);
+        assert_eq!(page.len(), 50);
+    }
+
+    /// Test get_all_meters_paginated with out-of-bounds offset.
+    /// Verifies that offset >= meter count returns empty Vec.
+    #[test]
+    fn test_get_all_meters_paginated_offset_out_of_bounds() {
+        let (env, client, _admin, _token_address) = setup_with_token();
+
+        // Register 10 meters
+        for i in 0..10 {
+            let user = Address::generate(&env);
+            client.allowlist_add(&user);
+            let meter_id = String::from_slice(&env, format!("M{}", i).as_bytes());
+            client.register_meter(&meter_id, &user);
+        }
+
+        // Get page with offset beyond total count
+        let page = client.get_all_meters_paginated(&100_u32, &50_u32);
+        assert_eq!(page.len(), 0);
+    }
+
+    /// Test get_all_meters_paginated with limit capping.
+    /// Verifies that limit is capped at 100 to prevent overruns.
+    #[test]
+    fn test_get_all_meters_paginated_limit_capped_at_100() {
+        let (env, client, _admin, _token_address) = setup_with_token();
+
+        // Register 150 meters
+        for i in 0..150 {
+            let user = Address::generate(&env);
+            client.allowlist_add(&user);
+            let meter_id = String::from_slice(&env, format!("M{}", i).as_bytes());
+            client.register_meter(&meter_id, &user);
+        }
+
+        // Request with limit > 100 — should be capped at 100
+        let page = client.get_all_meters_paginated(&0_u32, &200_u32);
+        assert_eq!(page.len(), 100);
+    }
+
+    /// Test get_all_meters_paginated with offset zero (boundary case).
+    /// Verifies correct behavior at the start boundary.
+    #[test]
+    fn test_get_all_meters_paginated_offset_zero() {
+        let (env, client, _admin, _token_address) = setup_with_token();
+
+        // Register 10 meters
+        for i in 0..10 {
+            let user = Address::generate(&env);
+            client.allowlist_add(&user);
+            let meter_id = String::from_slice(&env, format!("M{}", i).as_bytes());
+            client.register_meter(&meter_id, &user);
+        }
+
+        // Get first page from offset 0
+        let page = client.get_all_meters_paginated(&0_u32, &5_u32);
+        assert_eq!(page.len(), 5);
+    }
+
+    /// Test get_all_meters_paginated with empty contract.
+    /// Verifies correct edge case handling when no meters exist.
+    #[test]
+    fn test_get_all_meters_paginated_empty_contract() {
+        let (_env, client, _admin, _token_address) = setup_with_token();
+
+        // Get page from empty contract
+        let page = client.get_all_meters_paginated(&0_u32, &50_u32);
+        assert_eq!(page.len(), 0);
+    }
 }
 
 mod test;
