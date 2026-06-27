@@ -76,6 +76,33 @@ export function createMeterRouter(stellar: StellarService) {
     }),
   );
 
+  /** GET /api/meters/expiring — return meters expiring within the next 24 hours */
+  meterRouter.get(
+    "/expiring",
+    requireAdminKey,
+    asyncHandler(async (req, res) => {
+      const windowHours = Number(req.query.hours ?? 24);
+      if (isNaN(windowHours) || windowHours <= 0) {
+        return res.status(400).json({ error: "Invalid hours parameter" });
+      }
+
+      const result = await stellar.query("get_all_meters", []);
+      const allMeters = (StellarSdk.scValToNative(result) as any[]) ?? [];
+
+      const nowMs = Date.now();
+      const thresholdMs = nowMs + windowHours * 60 * 60 * 1000;
+
+      const expiring = allMeters.filter((m: any) => {
+        if (!m.expires_at) return false;
+        // Assume expires_at is in seconds since epoch based on Stellar types
+        const expiresMs = Number(m.expires_at) * 1000;
+        return expiresMs > nowMs && expiresMs <= thresholdMs;
+      });
+
+      res.json({ expiring, count: expiring.length });
+    })
+  );
+
   /** GET /api/meters/:id/status — lightweight status poll */
   meterRouter.get(
     "/:id/status",
@@ -98,6 +125,8 @@ export function createMeterRouter(stellar: StellarService) {
       } catch {
         return res.status(500).json({ error: "Query failed", code: "CONTRACT_ERROR" });
       }
+    }),
+  );
   /** GET /api/meters/owner/:address — list all meters for an owner (must be before /:id) */
   meterRouter.get(
     "/owner/:address",
