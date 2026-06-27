@@ -10,7 +10,10 @@ export const statsRouter = Router();
 let contractCache: { data: object; expiresAt: number } | null = null;
 
 // Cache for the prom-client metrics summary endpoint (15s TTL)
-let metricsCache: { data: object; expiresAt: number } | null = null;`n`n// Cache for meter counts grouped by plan (30s TTL)`nlet meterPlanCache: { data: object; expiresAt: number } | null = null;
+let metricsCache: { data: object; expiresAt: number } | null = null;
+
+// Cache for meter counts grouped by plan (30s TTL)
+let meterPlanCache: { data: object; expiresAt: number } | null = null;
 
 
 type MeterPlanBreakdown = {
