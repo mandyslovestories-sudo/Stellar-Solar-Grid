@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import Link from "next/link";
 import { useWalletStore } from "@/store/walletStore";
 
 const NAV_LINKS = [
@@ -37,7 +37,7 @@ export default function Navbar() {
     <nav className="bg-solar-accent border-b border-white/10 relative z-50">
       {/* Top bar */}
       <div className="flex items-center justify-between px-4 py-3 sm:px-6">
-        <Link to="/" className="text-xl font-bold text-solar-yellow" onClick={closeMenu}>
+        <Link href="/" className="text-xl font-bold text-solar-yellow" onClick={closeMenu}>
           ☀️ SolarGrid
         </Link>
 
@@ -46,7 +46,7 @@ export default function Navbar() {
           {NAV_LINKS.map((l) => (
             <Link
               key={l.href}
-              to={l.href}
+              href={l.href}
               className="text-sm text-gray-300 hover:text-white transition"
             >
               {l.label}
@@ -135,7 +135,7 @@ export default function Navbar() {
           {NAV_LINKS.map((l) => (
             <Link
               key={l.href}
-              to={l.href}
+              href={l.href}
               onClick={closeMenu}
               className="block rounded-lg px-3 py-3 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition"
             >
