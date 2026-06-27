@@ -7,6 +7,7 @@ import {
 } from "../lib/usageEvents.js";
 import { asyncHandler } from "../lib/asyncHandler.js";
 import { validateRequest, RegisterMeterSchema } from "../lib/validation.js";
+import { adminAuth } from "../lib/adminAuth.js";
 
 const balanceCache = new Map<string, { data: any; ts: number }>();
 const BALANCE_CACHE_TTL_MS = 5_000; // 5-second cache to reduce RPC load
@@ -34,6 +35,31 @@ export function createMeterRouter(stellar: StellarService) {
       res.setHeader("Content-Type", "text/csv");
       res.setHeader("Content-Disposition", "attachment; filename=meters.csv");
       return res.send([header, ...rows].join("\n"));
+    }),
+  );
+
+  /** GET /api/meters/:id/status — lightweight status poll */
+  meterRouter.get(
+    "/:id/status",
+    asyncHandler(async (req, res) => {
+      const { id } = req.params;
+      try {
+        const result = await stellar.query("get_meter", [
+          StellarSdk.nativeToScVal(id, { type: "symbol" }),
+        ]);
+        const meter = StellarSdk.scValToNative(result) as any;
+        if (!meter) return res.status(404).json({ error: "Meter not found", code: "METER_NOT_FOUND" });
+        return res.json({
+          meterId: id,
+          active: meter.active,
+          dailyLimit: meter.daily_limit,
+          daySpent: meter.day_spent,
+          expiresAt: meter.expires_at,
+          plan: meter.plan,
+        });
+      } catch {
+        return res.status(500).json({ error: "Query failed", code: "CONTRACT_ERROR" });
+      }
     }),
   );
 
@@ -198,6 +224,28 @@ export function createMeterRouter(stellar: StellarService) {
       res.status(500).json({ error: err.message });
     }
   });
+
+  /** POST /api/meters/:id/topup — top up meter token balance (admin only) */
+  meterRouter.post(
+    "/:id/topup",
+    adminAuth,
+    asyncHandler(async (req, res) => {
+      const { id } = req.params;
+      const { amount } = req.body;
+      if (!Number.isInteger(amount) || amount <= 0) {
+        return res.status(400).json({ error: "Invalid amount", code: "VALIDATION_ERROR" });
+      }
+      try {
+        const txHash = await stellar.invoke("topup_meter", [
+          StellarSdk.nativeToScVal(id, { type: "symbol" }),
+          StellarSdk.nativeToScVal(BigInt(amount), { type: "i128" }),
+        ]);
+        return res.json({ success: true, txHash, meterId: id, amount });
+      } catch (err: any) {
+        return res.status(500).json({ error: err.message, code: "CONTRACT_ERROR" });
+      }
+    }),
+  );
 
   return meterRouter;
 }

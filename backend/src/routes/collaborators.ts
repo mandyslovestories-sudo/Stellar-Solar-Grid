@@ -31,6 +31,25 @@ collaboratorRouter.get("/:contractId", async (req, res) => {
 });
 
 /**
+ * GET /api/collaborators/meter/:meterId — list collaborators for a specific meter
+ */
+collaboratorRouter.get("/meter/:meterId", async (req, res) => {
+  try {
+    const { meterId } = req.params;
+    const raw = await contractQuery("get_collaborators", [
+      StellarSdk.nativeToScVal(meterId, { type: "symbol" }),
+    ]);
+    const collaborators = ((StellarSdk.scValToNative(raw) as any[]) ?? []).map((c: any) => ({
+      address: c.address,
+      sharePercent: Number(c.share) / 100,
+    }));
+    return res.json({ meterId, collaborators, count: collaborators.length });
+  } catch {
+    return res.status(500).json({ error: "Query failed", code: "CONTRACT_ERROR" });
+  }
+});
+
+/**
  * POST /api/collaborators — add a collaborator (admin only)
  */
 collaboratorRouter.post("/", async (req, res) => {
