@@ -10,8 +10,69 @@ export const statsRouter = Router();
 let contractCache: { data: object; expiresAt: number } | null = null;
 
 // Cache for the prom-client metrics summary endpoint (15s TTL)
-let metricsCache: { data: object; expiresAt: number } | null = null;
+let metricsCache: { data: object; expiresAt: number } | null = null;`n`n// Cache for meter counts grouped by plan (30s TTL)`nlet meterPlanCache: { data: object; expiresAt: number } | null = null;
 
+
+type MeterPlanBreakdown = {
+  Daily: number;
+  Weekly: number;
+  Usage: number;
+  total: number;
+};
+
+const emptyPlanBreakdown = (): MeterPlanBreakdown => ({
+  Daily: 0,
+  Weekly: 0,
+  Usage: 0,
+  total: 0,
+});
+
+const normalizePlan = (plan: unknown): keyof Omit<MeterPlanBreakdown, "total"> | null => {
+  const raw =
+    typeof plan === "string"
+      ? plan
+      : typeof plan === "symbol"
+        ? plan.toString()
+        : plan && typeof plan === "object"
+          ? String(
+              (plan as { tag?: unknown; name?: unknown; variant?: unknown }).tag ??
+                (plan as { tag?: unknown; name?: unknown; variant?: unknown }).name ??
+                (plan as { tag?: unknown; name?: unknown; variant?: unknown }).variant ??
+                "",
+            )
+          : "";
+
+  const normalized = raw.toLowerCase().replace(/[^a-z]/g, "");
+  if (normalized === "daily") return "Daily";
+  if (normalized === "weekly") return "Weekly";
+  if (normalized === "usage" || normalized === "usagebased") return "Usage";
+  return null;
+};
+
+/**
+ * GET /api/stats/meters-by-plan — meter count breakdown by payment plan.
+ * Response is cached for 30 seconds and always includes all known plan keys.
+ *
+ * Closes #461.
+ */
+statsRouter.get("/meters-by-plan", asyncHandler(async (_req, res) => {
+  if (meterPlanCache && Date.now() < meterPlanCache.expiresAt) {
+    return res.json(meterPlanCache.data);
+  }
+
+  const result = await stellarService.query("get_all_meters", []);
+  const meters = (StellarSdk.scValToNative(result) as any[]) ?? [];
+  const data = emptyPlanBreakdown();
+
+  for (const meter of meters) {
+    const plan = normalizePlan(meter?.plan);
+    if (plan) data[plan] += 1;
+  }
+
+  data.total = meters.length;
+  meterPlanCache = { data, expiresAt: Date.now() + 30_000 };
+  res.json(data);
+}));
 /**
  * GET /api/stats — contract-derived meter statistics (existing endpoint)
  */
