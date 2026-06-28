@@ -98,6 +98,9 @@ export function createMeterRouter(stellar: StellarService) {
       } catch {
         return res.status(500).json({ error: "Query failed", code: "CONTRACT_ERROR" });
       }
+    }),
+  );
+
   /** GET /api/meters/owner/:address — list all meters for an owner (must be before /:id) */
   meterRouter.get(
     "/owner/:address",

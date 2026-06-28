@@ -18,6 +18,7 @@ import { logger } from "./lib/logger.js";
 import { writeLimiter, readLimiter } from "./middleware/rateLimit.js";
 import { collaboratorRouter } from "./routes/collaborators.js";
 import { statsRouter } from "./routes/stats.js";
+import { providerRouter } from "./routes/provider.js";
 import { startIoTBridge } from "./iot/bridge.js";
 import { startLimitWatcher } from "./iot/limitWatcher.js";
 import { logger } from "./lib/logger.js";
@@ -157,6 +158,7 @@ app.use("/api/collaborators", collaboratorRouter);
 app.use("/api/allowlist", allowlistRouter);
 app.use("/api/collaborators", collaboratorRouter);
 app.use("/api/stats", statsRouter);
+app.use("/api/provider", providerRouter);
 app.use("/api/metrics", metricsRouter);
 
 // #420: GET /api/health — version, uptime, dependency status
