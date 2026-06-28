@@ -75,6 +75,10 @@ input, select, textarea {
   margin-bottom: 0.75rem;
 }
 
+.badge--active   { background: #22c55e; color: #fff; }
+.badge--inactive { background: #ef4444; color: #fff; }
+.badge--expired  { background: #f59e0b; color: #fff; }
+
 /* ── CollaboratorTable ───────────────────────────────────────────────────── */
 .collab-table {
   width: 100%;
