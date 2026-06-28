@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useOffline } from "@/hooks/useOffline";
 
 const SMS_SHORTCODE = process.env.NEXT_PUBLIC_SMS_SHORTCODE ?? "20880";
 const SMS_WEBHOOK_DOCS =
@@ -19,6 +20,7 @@ const PLANS = [
 ];
 
 export default function OfflinePaymentModal({ meterId, onClose }: Props) {
+  const isOffline = useOffline();
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const exampleMeter = meterId?.trim() || "METER1";
@@ -89,10 +91,45 @@ export default function OfflinePaymentModal({ meterId, onClose }: Props) {
         <div className="px-5 py-5 space-y-5 max-h-[80vh] overflow-y-auto">
 
           {/* Offline banner */}
-          <div className="flex items-center gap-2 rounded-lg border border-yellow-500/30 bg-yellow-900/20 px-3 py-2.5 text-xs text-yellow-300">
-            <span>⚠️</span>
-            <span>You appear to be offline. Use SMS to top up your meter without internet.</span>
-          </div>
+          {isOffline && (
+            <div className="flex items-center gap-2 rounded-lg border border-yellow-500/30 bg-yellow-900/20 px-3 py-2.5 text-xs text-yellow-300" role="alert">
+              <span>⚠️</span>
+              <span>You are offline. Use the QR code below for offline payment.</span>
+            </div>
+          )}
+
+          {/* QR code section — highlighted as primary CTA when offline */}
+          <section
+            className={`rounded-lg border px-4 py-4 text-center transition ${
+              isOffline
+                ? "border-solar-yellow bg-solar-yellow/10 ring-2 ring-solar-yellow/40"
+                : "border-white/10 bg-solar-dark"
+            }`}
+            aria-label="QR code for offline payment"
+          >
+            <p className="text-xs font-semibold text-solar-yellow mb-3">
+              {isOffline ? "📲 Scan QR to pay offline" : "Offline payment QR code"}
+            </p>
+            <div className="inline-flex items-center justify-center rounded-lg bg-white p-3">
+              {/* QR placeholder — replace with <QRCode value={...} /> if a library is available */}
+              <svg width="80" height="80" viewBox="0 0 80 80" aria-hidden="true">
+                <rect width="80" height="80" fill="white" />
+                <rect x="5" y="5" width="30" height="30" fill="none" stroke="black" strokeWidth="5" />
+                <rect x="12" y="12" width="16" height="16" fill="black" />
+                <rect x="45" y="5" width="30" height="30" fill="none" stroke="black" strokeWidth="5" />
+                <rect x="52" y="12" width="16" height="16" fill="black" />
+                <rect x="5" y="45" width="30" height="30" fill="none" stroke="black" strokeWidth="5" />
+                <rect x="12" y="52" width="16" height="16" fill="black" />
+                <rect x="45" y="45" width="10" height="10" fill="black" />
+                <rect x="60" y="45" width="10" height="10" fill="black" />
+                <rect x="45" y="60" width="10" height="10" fill="black" />
+                <rect x="60" y="60" width="10" height="10" fill="black" />
+              </svg>
+            </div>
+            <p className="mt-2 text-xs text-gray-400">
+              Scan with your phone to initiate an offline SMS payment
+            </p>
+          </section>
 
           {/* Step 1 */}
           <section>
@@ -183,7 +220,20 @@ export default function OfflinePaymentModal({ meterId, onClose }: Props) {
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-4 border-t border-white/10">
+        <div className="px-5 py-4 border-t border-white/10 space-y-2">
+          <button
+            type="submit"
+            disabled={isOffline}
+            aria-disabled={isOffline}
+            title={isOffline ? "Blockchain payments unavailable while offline. Use QR or SMS above." : undefined}
+            className={`w-full rounded-lg py-3 text-sm font-semibold transition ${
+              isOffline
+                ? "bg-solar-yellow/30 text-solar-dark/50 cursor-not-allowed"
+                : "bg-solar-yellow text-solar-dark hover:opacity-90"
+            }`}
+          >
+            {isOffline ? "Offline — use QR" : "Pay"}
+          </button>
           <button
             onClick={onClose}
             className="w-full rounded-lg border border-white/10 py-3 text-sm text-gray-300 hover:border-solar-yellow hover:text-solar-yellow transition"

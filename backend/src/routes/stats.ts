@@ -3,6 +3,7 @@ import * as StellarSdk from "@stellar/stellar-sdk";
 import { stellarService } from "../lib/stellar.js";
 import { asyncHandler } from "../lib/asyncHandler.js";
 import { register } from "../lib/metrics.js";
+import { logger } from "../lib/logger.js";
 
 export const statsRouter = Router();
 
@@ -12,6 +13,75 @@ let contractCache: { data: object; expiresAt: number } | null = null;
 // Cache for the prom-client metrics summary endpoint (15s TTL)
 let metricsCache: { data: object; expiresAt: number } | null = null;
 
+// Cache for meters-by-plan breakdown (30s TTL)
+let metersByPlanCache: { data: object; expiresAt: number } | null = null;
+
+let metricsCache: { data: object; expiresAt: number } | null = null;
+
+// Cache for meter counts grouped by plan (30s TTL)
+let meterPlanCache: { data: object; expiresAt: number } | null = null;
+
+
+type MeterPlanBreakdown = {
+  Daily: number;
+  Weekly: number;
+  Usage: number;
+  total: number;
+};
+
+const emptyPlanBreakdown = (): MeterPlanBreakdown => ({
+  Daily: 0,
+  Weekly: 0,
+  Usage: 0,
+  total: 0,
+});
+
+const normalizePlan = (plan: unknown): keyof Omit<MeterPlanBreakdown, "total"> | null => {
+  const raw =
+    typeof plan === "string"
+      ? plan
+      : typeof plan === "symbol"
+        ? plan.toString()
+        : plan && typeof plan === "object"
+          ? String(
+              (plan as { tag?: unknown; name?: unknown; variant?: unknown }).tag ??
+                (plan as { tag?: unknown; name?: unknown; variant?: unknown }).name ??
+                (plan as { tag?: unknown; name?: unknown; variant?: unknown }).variant ??
+                "",
+            )
+          : "";
+
+  const normalized = raw.toLowerCase().replace(/[^a-z]/g, "");
+  if (normalized === "daily") return "Daily";
+  if (normalized === "weekly") return "Weekly";
+  if (normalized === "usage" || normalized === "usagebased") return "Usage";
+  return null;
+};
+
+/**
+ * GET /api/stats/meters-by-plan — meter count breakdown by payment plan.
+ * Response is cached for 30 seconds and always includes all known plan keys.
+ *
+ * Closes #461.
+ */
+statsRouter.get("/meters-by-plan", asyncHandler(async (_req, res) => {
+  if (meterPlanCache && Date.now() < meterPlanCache.expiresAt) {
+    return res.json(meterPlanCache.data);
+  }
+
+  const result = await stellarService.query("get_all_meters", []);
+  const meters = (StellarSdk.scValToNative(result) as any[]) ?? [];
+  const data = emptyPlanBreakdown();
+
+  for (const meter of meters) {
+    const plan = normalizePlan(meter?.plan);
+    if (plan) data[plan] += 1;
+  }
+
+  data.total = meters.length;
+  meterPlanCache = { data, expiresAt: Date.now() + 30_000 };
+  res.json(data);
+}));
 /**
  * GET /api/stats — contract-derived meter statistics (existing endpoint)
  */
@@ -33,6 +103,8 @@ statsRouter.get("/", asyncHandler(async (_req, res) => {
       StellarSdk.nativeToScVal(adminAddr, { type: "address" }),
     ]);
     revenue = Number(StellarSdk.scValToNative(rev));
+  } else {
+    logger.warn('ADMIN_ADDRESS environment variable is not set; provider revenue query skipped');
   }
 
   const data = {
@@ -42,6 +114,32 @@ statsRouter.get("/", asyncHandler(async (_req, res) => {
     totalRevenue: revenue,
   };
   contractCache = { data, expiresAt: Date.now() + 30_000 };
+  res.json(data);
+}));
+
+/**
+ * GET /api/stats/meters-by-plan — meter count breakdown by plan type.
+ * Returns zero counts for plan types with no meters.
+ * Cached for 30 seconds.
+ *
+ * Closes #461.
+ */
+statsRouter.get("/meters-by-plan", asyncHandler(async (_req, res) => {
+  if (metersByPlanCache && Date.now() < metersByPlanCache.expiresAt) {
+    return res.json(metersByPlanCache.data);
+  }
+
+  const result = await stellarService.query("get_all_meters", []);
+  const meters = (StellarSdk.scValToNative(result) as any[]) ?? [];
+
+  const counts: Record<string, number> = { Daily: 0, Weekly: 0, Usage: 0 };
+  for (const meter of meters) {
+    const plan = String(meter.plan);
+    if (plan in counts) counts[plan]++;
+  }
+
+  const data = { ...counts, total: meters.length };
+  metersByPlanCache = { data, expiresAt: Date.now() + 30_000 };
   res.json(data);
 }));
 

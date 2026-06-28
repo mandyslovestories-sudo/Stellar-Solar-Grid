@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useToast } from "@/components/ToastProvider";
-import styles from './CollaboratorTable.module.css';
+import { Skeleton } from "@/components/Skeleton";
 
 export interface Collaborator {
   address: string;
@@ -11,12 +11,15 @@ export interface Collaborator {
 
 interface Props {
   collaborators: Collaborator[];
+  loading?: boolean;
   onAdd: (address: string, basisPoints: number) => Promise<void>;
   onRemove: (address: string) => Promise<void>;
+  onRefresh?: () => Promise<void>;
 }
 
-export default function CollaboratorTable({ collaborators, onAdd, onRemove }: Props) {
-  const { showToast } = useToast();
+import styles from './CollaboratorTable.module.css';
+
+export default function CollaboratorTable({ collaborators, loading }: Props) {
   const [copied, setCopied] = useState<string | null>(null);
   const [newAddress, setNewAddress] = useState("");
   const [newBasisPoints, setNewBasisPoints] = useState("");
@@ -64,42 +67,32 @@ export default function CollaboratorTable({ collaborators, onAdd, onRemove }: Pr
     setTimeout(() => setCopied(null), 1500);
   }
 
-  async function handleRemove(address: string) {
-    setConfirmRemove(null);
-    setIsRemoving(address);
-    try {
-      await onRemove(address);
-      showToast({ variant: "success", title: "Collaborator removed" });
-    } catch (err: unknown) {
-      showToast({
-        variant: "error",
-        title: "Remove failed",
-        description: err instanceof Error ? err.message : "Failed to remove collaborator",
-      });
-    } finally {
-      setIsRemoving(null);
-    }
+  if (loading) {
+    return (
+      <div className="card overflow-x-auto">
+        <span className="badge">Collaborators</span>
+        <table className="collab-table">
+          <thead>
+            <tr>
+              <th>Address</th>
+              <th className="text-right">Share</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[0, 1, 2].map((i) => (
+              <tr key={i}>
+                <td className="py-3"><Skeleton width="70%" height={14} /></td>
+                <td className="py-3"><Skeleton width="40%" height={14} /></td>
+                <td className="py-3" style={{ textAlign: "right" }}><Skeleton width="60px" height={28} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
   }
 
-  async function handleAddSubmit() {
-    if (!newAddress.trim() || !newBasisPoints) return;
-    setIsAdding(true);
-    try {
-      await onAdd(newAddress.trim(), Number(newBasisPoints));
-      setNewAddress("");
-      setNewBasisPoints("");
-      showToast({ variant: "success", title: "Collaborator added" });
-    } catch (err: unknown) {
-      showToast({
-        variant: "error",
-        title: "Add failed",
-        description: err instanceof Error ? err.message : "Failed to add collaborator",
-      });
-    } finally {
-      setIsAdding(false);
-    }
-  }
-
+  // Empty state — helpful message instead of silent null
   if (!collaborators.length) {
     return (
       <div className="card">
@@ -236,9 +229,50 @@ export default function CollaboratorTable({ collaborators, onAdd, onRemove }: Pr
                 </button>
               </td>
             </tr>
-          </tbody>
-        </table>
-      </div>
-    </>
+          ))}
+
+          {/* Inline Add Collaborator Form Row */}
+          <tr>
+            <td className="pt-4">
+              <input
+                type="text"
+                placeholder="Stellar Address (G...)"
+                value={newAddress}
+                onChange={(e) => setNewAddress(e.target.value)}
+                disabled={isAdding || isRemoving !== null}
+                className="w-full bg-solar-dark border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-solar-yellow transition"
+              />
+            </td>
+            <td className="pt-4">
+              <input
+                type="number"
+                placeholder="Basis points (100 = 1%)"
+                value={newBasisPoints}
+                onChange={(e) => setNewBasisPoints(e.target.value)}
+                disabled={isAdding || isRemoving !== null}
+                className="w-full bg-solar-dark border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-solar-yellow transition"
+              />
+            </td>
+            <td className="pt-4" style={{ textAlign: "right" }}>
+              <button
+                onClick={handleAddSubmit}
+                disabled={isAdding || isRemoving !== null}
+                className="bg-solar-yellow text-solar-dark text-xs font-semibold px-4 py-1.5 rounded-lg hover:opacity-90 disabled:opacity-50 transition"
+              >
+                {isAdding ? "Adding..." : "Add"}
+              </button>
+            </td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr className={styles.totalRow}>
+            <td colSpan={2} className={styles.totalLabel}>Total</td>
+            <td className={`${styles.totalValue} ${collaborators.reduce((sum, c) => sum + c.basisPoints, 0) > 10000 ? styles.totalExceeded : ""}`}>
+              {(collaborators.reduce((sum, c) => sum + c.basisPoints, 0) / 100).toFixed(2)}%
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
   );
 }
