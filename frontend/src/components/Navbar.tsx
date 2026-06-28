@@ -48,7 +48,7 @@ export default function Navbar() {
           {NAV_LINKS.map((l) => (
             <Link
               key={l.href}
-              to={l.href}
+              href={l.href}
               className="text-sm text-gray-300 hover:text-white transition"
             >
               {l.label}
@@ -137,7 +137,7 @@ export default function Navbar() {
           {NAV_LINKS.map((l) => (
             <Link
               key={l.href}
-              to={l.href}
+              href={l.href}
               onClick={closeMenu}
               className="block rounded-lg px-3 py-3 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition"
             >
