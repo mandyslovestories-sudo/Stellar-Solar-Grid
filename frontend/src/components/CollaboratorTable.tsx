@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useToast } from "@/components/ToastProvider";
+import { Skeleton } from "@/components/Skeleton";
 
 export interface Collaborator {
   address: string;
@@ -10,13 +11,15 @@ export interface Collaborator {
 
 interface Props {
   collaborators: Collaborator[];
+  loading?: boolean;
   onAdd: (address: string, basisPoints: number) => Promise<void>;
   onRemove: (address: string) => Promise<void>;
+  onRefresh?: () => Promise<void>;
 }
 
 import styles from './CollaboratorTable.module.css';
 
-export default function CollaboratorTable({ collaborators }: Props) {
+export default function CollaboratorTable({ collaborators, loading }: Props) {
   const [copied, setCopied] = useState<string | null>(null);
   const [newAddress, setNewAddress] = useState("");
   const [newBasisPoints, setNewBasisPoints] = useState("");
@@ -27,6 +30,31 @@ export default function CollaboratorTable({ collaborators }: Props) {
     navigator.clipboard.writeText(address);
     setCopied(address);
     setTimeout(() => setCopied(null), 1500);
+  }
+
+  if (loading) {
+    return (
+      <div className="card overflow-x-auto">
+        <span className="badge">Collaborators</span>
+        <table className="collab-table">
+          <thead>
+            <tr>
+              <th>Address</th>
+              <th className="text-right">Share</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[0, 1, 2].map((i) => (
+              <tr key={i}>
+                <td className="py-3"><Skeleton width="70%" height={14} /></td>
+                <td className="py-3"><Skeleton width="40%" height={14} /></td>
+                <td className="py-3" style={{ textAlign: "right" }}><Skeleton width="60px" height={28} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
   }
 
   // Empty state — helpful message instead of silent null
@@ -140,6 +168,14 @@ export default function CollaboratorTable({ collaborators }: Props) {
             </td>
           </tr>
         </tbody>
+        <tfoot>
+          <tr className={styles.totalRow}>
+            <td colSpan={2} className={styles.totalLabel}>Total</td>
+            <td className={`${styles.totalValue} ${collaborators.reduce((sum, c) => sum + c.basisPoints, 0) > 10000 ? styles.totalExceeded : ""}`}>
+              {(collaborators.reduce((sum, c) => sum + c.basisPoints, 0) / 100).toFixed(2)}%
+            </td>
+          </tr>
+        </tfoot>
       </table>
     </div>
   );

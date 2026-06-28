@@ -1,6 +1,7 @@
 import { Router } from "express";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { contractQuery, adminInvoke } from "../lib/stellar.js";
+import { requireAdminKey } from "../middleware/adminAuth.js";
 
 export const collaboratorRouter = Router();
 
@@ -8,6 +9,9 @@ export interface CollaboratorShare {
   address: string;
   basisPoints: number;
 }
+
+// Cache for total-shares (5s TTL)
+let totalSharesCache: { data: object; expiresAt: number } | null = null;
 
 /**
  * GET /api/collaborators
@@ -25,6 +29,31 @@ collaboratorRouter.get("/", async (req, res) => {
     );
 
     res.json({ collaborators });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/collaborators/total-shares — sum of all collaborator basis points.
+ * Lets the frontend validate that new collaborators won't exceed 10 000 bps.
+ * Cached for 5 seconds.
+ *
+ * Closes #463.
+ */
+collaboratorRouter.get("/total-shares", async (_req, res) => {
+  if (totalSharesCache && Date.now() < totalSharesCache.expiresAt) {
+    return res.json(totalSharesCache.data);
+  }
+
+  try {
+    const raw = await contractQuery("get_all_shares", []);
+    const shareMap = StellarSdk.scValToNative(raw) as Record<string, number>;
+
+    const total_basis_points = Object.values(shareMap).reduce((s, n) => s + n, 0);
+    const data = { total_basis_points, remaining: 10000 - total_basis_points };
+    totalSharesCache = { data, expiresAt: Date.now() + 5_000 };
+    res.json(data);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

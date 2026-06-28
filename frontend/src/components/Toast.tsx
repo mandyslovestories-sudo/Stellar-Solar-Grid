@@ -9,7 +9,7 @@ function ToastItem({ toast }: { toast: Toast }) {
   useEffect(() => {
     const timer = setTimeout(() => {
       remove(toast.id);
-    }, 4000);
+    }, 5000);
     return () => clearTimeout(timer);
   }, [toast.id, remove]);
 
