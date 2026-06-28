@@ -158,6 +158,7 @@ app.use("/api/collaborators", collaboratorRouter);
 app.use("/api/stats", statsRouter);
 app.use("/api/provider", providerRouter);
 app.use("/api/metrics", metricsRouter);
+app.use("/api/solar", solarRouter);
 
 // #420: GET /api/health — version, uptime, dependency status
 app.get("/api/health", async (_req, res) => {
