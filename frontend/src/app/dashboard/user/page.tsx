@@ -6,7 +6,6 @@ import Navbar from "@/components/Navbar";
 import { SkeletonCard } from "@/components/SkeletonCard";
 import { Skeleton } from "@/components/Skeleton";
 import UsageChart, { type UsageDataPoint } from "@/components/UsageChart";
-import { SkeletonCard } from "@/components/SkeletonCard";
 import { useWalletStore } from "@/store/walletStore";
 import { getMeter, getMetersByOwner, type MeterData } from "@/services/meterService";
 import { parseWalletError } from "@/lib/errors";
@@ -176,10 +175,10 @@ function MeterCard({ meterId, meter }: { meterId: string; meter: MeterData }) {
           Top Up
         </Link>
         <Link
-          href="/history"
+          href={`/history?meterId=${meterId}`}
           className="rounded-lg border border-white/10 px-4 py-2 text-xs text-gray-300 hover:border-solar-yellow hover:text-solar-yellow transition"
         >
-          History
+          View history
         </Link>
       </div>
     </div>
