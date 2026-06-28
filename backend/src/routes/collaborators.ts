@@ -1,7 +1,7 @@
 import { Router } from "express";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { contractQuery, adminInvoke } from "../lib/stellar.js";
-
+import { requireAdminKey } from "../middleware/adminAuth.js";
 export const collaboratorRouter = Router();
 
 export interface CollaboratorShare {
