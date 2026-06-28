@@ -143,6 +143,31 @@ export function createMeterRouter(stellar: StellarService) {
     }),
   );
 
+  /** GET /api/meters/:id/plan — current plan type and expiry timestamp */
+  meterRouter.get(
+    "/:id/plan",
+    cacheFor(5_000),
+    asyncHandler(async (req, res) => {
+      const meterId = req.params.id;
+      let meter: any;
+      try {
+        const result = await stellar.query("get_meter", [
+          StellarSdk.nativeToScVal(meterId, { type: "symbol" }),
+        ]);
+        meter = StellarSdk.scValToNative(result);
+      } catch {
+        return res.status(404).json({ error: "Meter not found", code: "NOT_FOUND" });
+      }
+      if (!meter) return res.status(404).json({ error: "Meter not found", code: "NOT_FOUND" });
+      return res.json({
+        meter_id: meterId,
+        plan: meter.plan,
+        expires_at: meter.expires_at,
+        active: meter.active,
+      });
+    }),
+  );
+
   /** GET /api/meters/:id — get meter status */
   meterRouter.get(
     "/:id",
@@ -351,6 +376,64 @@ export function createMeterRouter(stellar: StellarService) {
       } catch (err: any) {
         return res.status(500).json({ error: err.message, code: "CONTRACT_ERROR" });
       }
+    }),
+  );
+
+  /** DELETE /api/meters/:id — admin deregisters a meter */
+  meterRouter.delete(
+    "/:id",
+    requireAdminKey,
+    asyncHandler(async (req, res) => {
+      const meterId = req.params.id;
+      let meter: any;
+      try {
+        const result = await stellar.query("get_meter", [
+          StellarSdk.nativeToScVal(meterId, { type: "symbol" }),
+        ]);
+        meter = StellarSdk.scValToNative(result);
+      } catch {
+        return res.status(404).json({ error: "Meter not found", code: "NOT_FOUND" });
+      }
+      if (!meter) return res.status(404).json({ error: "Meter not found", code: "NOT_FOUND" });
+      const hash = await stellar.invoke("deregister_meter", [
+        StellarSdk.nativeToScVal(meterId, { type: "symbol" }),
+      ]);
+      invalidateCache(`/api/meters/${meterId}`);
+      return res.json({ hash, meter_id: meterId, deleted: true });
+    }),
+  );
+
+  /** POST /api/meters/:id/renew — trigger plan renewal payment for an expired meter */
+  meterRouter.post(
+    "/:id/renew",
+    requireAdminKey,
+    asyncHandler(async (req, res) => {
+      const meterId = req.params.id;
+      const { amount_xlm, plan } = req.body as { amount_xlm: unknown; plan: unknown };
+
+      const amount = Number(amount_xlm);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return res.status(400).json({ error: "amount_xlm must be a positive number", code: "VALIDATION_ERROR" });
+      }
+
+      let meter: any;
+      try {
+        const result = await stellar.query("get_meter", [
+          StellarSdk.nativeToScVal(meterId, { type: "symbol" }),
+        ]);
+        meter = StellarSdk.scValToNative(result);
+      } catch {
+        return res.status(404).json({ error: "Meter not found", code: "NOT_FOUND" });
+      }
+      if (!meter) return res.status(404).json({ error: "Meter not found", code: "NOT_FOUND" });
+
+      const planValue = plan ?? meter.plan;
+      const hash = await stellar.invoke("make_payment", [
+        StellarSdk.nativeToScVal(meterId, { type: "symbol" }),
+        StellarSdk.nativeToScVal(BigInt(Math.round(amount * 1e7)), { type: "i128" }),
+        StellarSdk.nativeToScVal(planValue, { type: "symbol" }),
+      ]);
+      return res.json({ hash, meter_id: meterId, renewed: true });
     }),
   );
 
