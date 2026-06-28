@@ -12,6 +12,7 @@ interface WalletState {
   address: string | null;
   kit: StellarWalletsKit | null;
   connectError: string | null;
+  isConnecting: boolean;
   connect: () => Promise<void>;
   disconnect: () => void;
   clearConnectError: () => void;
@@ -33,9 +34,10 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   address: null,
   kit: null,
   connectError: null,
+  isConnecting: false,
 
   connect: async () => {
-    set({ connectError: null });
+    set({ connectError: null, isConnecting: true });
     try {
       const kit = buildKit();
       await kit.openModal({
@@ -57,6 +59,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
           ? "Selected wallet is not installed."
           : msg,
       });
+    } finally {
+      set({ isConnecting: false });
     }
   },
 
