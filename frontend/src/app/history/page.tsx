@@ -105,14 +105,20 @@ export default function HistoryPage() {
           PAGE_SIZE,
           serverSort,
         );
+        if (!data || !data.payments) {
+          throw new Error("Invalid response: missing payments data");
+        }
         setRecords(data.payments);
         setPagination({
-          page: data.pagination.page,
-          pages: data.pagination.pages,
-          total: data.pagination.total,
+          page: data.pagination?.page ?? 1,
+          pages: data.pagination?.pages ?? 1,
+          total: data.pagination?.total ?? 0,
         });
       } catch (e: any) {
-        setError(e.message ?? "Failed to load payment history");
+        const errorMsg = e.message ?? "Failed to load payment history";
+        setError(errorMsg);
+        setRecords([]);
+        setPagination({ page: 1, pages: 1, total: 0 });
       } finally {
         setLoading(false);
       }

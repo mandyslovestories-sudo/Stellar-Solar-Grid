@@ -37,6 +37,9 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   connect: async () => {
     set({ connectError: null });
     try {
+      if (typeof window === "undefined" || !(window as any).freighter) {
+        throw new Error("Freighter extension is not installed. Please install it to continue.");
+      }
       const kit = buildKit();
       await kit.openModal({
         onWalletSelected: async (option) => {

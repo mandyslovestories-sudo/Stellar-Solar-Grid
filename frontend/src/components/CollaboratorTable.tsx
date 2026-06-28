@@ -14,6 +14,7 @@ interface Props {
   loading?: boolean;
   onAdd: (address: string, basisPoints: number) => Promise<void>;
   onRemove: (address: string) => Promise<void>;
+  onRefresh?: () => Promise<void>;
 }
 
 import styles from './CollaboratorTable.module.css';
