@@ -27,6 +27,7 @@ import {
   startUsageEventRetryWorker,
 } from "./lib/usageEvents.js";
 import { metricsRouter } from "./routes/metrics.js";
+import { adminLoginRouter } from "./routes/adminLogin.js";
 import { createRequire } from "module";
 
 const _require = createRequire(import.meta.url);
@@ -158,6 +159,7 @@ app.use("/api/allowlist", allowlistRouter);
 app.use("/api/collaborators", collaboratorRouter);
 app.use("/api/stats", statsRouter);
 app.use("/api/metrics", metricsRouter);
+app.use("/api/admin/login", adminLoginRouter);
 
 // #420: GET /api/health — version, uptime, dependency status
 app.get("/api/health", async (_req, res) => {
