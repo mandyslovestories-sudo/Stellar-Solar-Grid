@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import { Skeleton } from "@/components/Skeleton";
@@ -31,6 +31,19 @@ export default function ProviderDashboardPage() {
 
   const [meters, setMeters] = useState<MeterData[]>([]);
   const [fetching, setFetching] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key !== "/") return;
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      e.preventDefault();
+      searchInputRef.current?.focus();
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const addressInvalid =
     ownerAddress.trim().length > 0 && !isValidStellarAddress(ownerAddress.trim());
@@ -261,11 +274,12 @@ export default function ProviderDashboardPage() {
             </button>
           </div>
 
-          {/* Search Input */}
+          {/* Search Input — focus with "/" shortcut */}
           <div className="relative mb-4">
             <input
+              ref={searchInputRef}
               type="search"
-              placeholder="Search by owner address…"
+              placeholder="Search by owner address… (press / to focus)"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => {
