@@ -216,6 +216,14 @@ export function startUsageEventRetryWorker() {
     void retryQueuedUsageEvents();
   }, RETRY_INTERVAL_MS);
   retryTimer.unref?.();
+
+  process.on('SIGTERM', () => {
+    if (retryTimer) {
+      clearInterval(retryTimer);
+      retryTimer = undefined;
+      logger.info('Usage event retry worker stopped on SIGTERM');
+    }
+  });
 }
 
 export async function retryQueuedUsageEvents() {

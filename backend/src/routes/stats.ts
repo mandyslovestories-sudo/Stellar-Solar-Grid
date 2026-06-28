@@ -3,6 +3,7 @@ import * as StellarSdk from "@stellar/stellar-sdk";
 import { stellarService } from "../lib/stellar.js";
 import { asyncHandler } from "../lib/asyncHandler.js";
 import { register } from "../lib/metrics.js";
+import { logger } from "../lib/logger.js";
 
 export const statsRouter = Router();
 
@@ -97,6 +98,8 @@ statsRouter.get("/", asyncHandler(async (_req, res) => {
       StellarSdk.nativeToScVal(adminAddr, { type: "address" }),
     ]);
     revenue = Number(StellarSdk.scValToNative(rev));
+  } else {
+    logger.warn('ADMIN_ADDRESS environment variable is not set; provider revenue query skipped');
   }
 
   const data = {
