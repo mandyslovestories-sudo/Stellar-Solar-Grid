@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useToast } from "@/components/ToastProvider";
+import { Skeleton } from "@/components/Skeleton";
 
 export interface Collaborator {
   address: string;
@@ -10,6 +11,7 @@ export interface Collaborator {
 
 interface Props {
   collaborators: Collaborator[];
+  loading?: boolean;
   onAdd: (address: string, basisPoints: number) => Promise<void>;
   onRemove: (address: string) => Promise<void>;
   onRefresh?: () => Promise<void>;
@@ -17,8 +19,7 @@ interface Props {
 
 import styles from './CollaboratorTable.module.css';
 
-export default function CollaboratorTable({ collaborators, onAdd, onRemove, onRefresh }: Props) {
-  const { showToast } = useToast();
+export default function CollaboratorTable({ collaborators, loading }: Props) {
   const [copied, setCopied] = useState<string | null>(null);
   const [newAddress, setNewAddress] = useState("");
   const [newBasisPoints, setNewBasisPoints] = useState("");
@@ -31,57 +32,29 @@ export default function CollaboratorTable({ collaborators, onAdd, onRemove, onRe
     setTimeout(() => setCopied(null), 1500);
   }
 
-  async function handleAddSubmit() {
-    if (!newAddress.trim() || !newBasisPoints.trim()) {
-      showToast({
-        variant: "error",
-        title: "Invalid input",
-        description: "Please enter both address and basis points.",
-      });
-      return;
-    }
-
-    setIsAdding(true);
-    try {
-      await onAdd(newAddress.trim(), Number(newBasisPoints));
-      setNewAddress("");
-      setNewBasisPoints("");
-      if (onRefresh) await onRefresh();
-      showToast({
-        variant: "success",
-        title: "Collaborator added",
-        description: "The collaborator list has been updated.",
-      });
-    } catch (err) {
-      showToast({
-        variant: "error",
-        title: "Failed to add collaborator",
-        description: err instanceof Error ? err.message : "Failed to add collaborator",
-      });
-    } finally {
-      setIsAdding(false);
-    }
-  }
-
-  async function handleRemove(address: string) {
-    setIsRemoving(address);
-    try {
-      await onRemove(address);
-      if (onRefresh) await onRefresh();
-      showToast({
-        variant: "success",
-        title: "Collaborator removed",
-        description: "The collaborator list has been updated.",
-      });
-    } catch (err) {
-      showToast({
-        variant: "error",
-        title: "Failed to remove collaborator",
-        description: err instanceof Error ? err.message : "Failed to remove collaborator",
-      });
-    } finally {
-      setIsRemoving(null);
-    }
+  if (loading) {
+    return (
+      <div className="card overflow-x-auto">
+        <span className="badge">Collaborators</span>
+        <table className="collab-table">
+          <thead>
+            <tr>
+              <th>Address</th>
+              <th className="text-right">Share</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[0, 1, 2].map((i) => (
+              <tr key={i}>
+                <td className="py-3"><Skeleton width="70%" height={14} /></td>
+                <td className="py-3"><Skeleton width="40%" height={14} /></td>
+                <td className="py-3" style={{ textAlign: "right" }}><Skeleton width="60px" height={28} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
   }
 
   // Empty state — helpful message instead of silent null
@@ -195,6 +168,14 @@ export default function CollaboratorTable({ collaborators, onAdd, onRemove, onRe
             </td>
           </tr>
         </tbody>
+        <tfoot>
+          <tr className={styles.totalRow}>
+            <td colSpan={2} className={styles.totalLabel}>Total</td>
+            <td className={`${styles.totalValue} ${collaborators.reduce((sum, c) => sum + c.basisPoints, 0) > 10000 ? styles.totalExceeded : ""}`}>
+              {(collaborators.reduce((sum, c) => sum + c.basisPoints, 0) / 100).toFixed(2)}%
+            </td>
+          </tr>
+        </tfoot>
       </table>
     </div>
   );

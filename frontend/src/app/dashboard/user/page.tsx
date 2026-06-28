@@ -6,11 +6,11 @@ import Navbar from "@/components/Navbar";
 import { SkeletonCard } from "@/components/SkeletonCard";
 import { Skeleton } from "@/components/Skeleton";
 import UsageChart, { type UsageDataPoint } from "@/components/UsageChart";
-import { SkeletonCard } from "@/components/SkeletonCard";
 import { useWalletStore } from "@/store/walletStore";
 import { getMeter, getMetersByOwner, type MeterData } from "@/services/meterService";
 import { parseWalletError } from "@/lib/errors";
 import { useToast } from "@/components/ToastProvider";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 const STROOPS_PER_XLM = 10_000_000n;
 
@@ -83,6 +83,36 @@ function ErrorCard({ meterId, error }: { meterId: string; error: string }) {
   );
 }
 
+function CountdownTimer({ expiresAt, plan }: { expiresAt: bigint; plan: string }) {
+  const isTimedPlan = plan === "Daily" || plan === "Weekly";
+  const expSec = Number(expiresAt);
+  const hasExpiry = expSec > 0 && expSec !== Number.MAX_SAFE_INTEGER;
+
+  const [remaining, setRemaining] = useState(() =>
+    isTimedPlan && hasExpiry ? Math.max(0, expSec - Math.floor(Date.now() / 1000)) : -1
+  );
+
+  useEffect(() => {
+    if (!isTimedPlan || !hasExpiry) return;
+    const tick = () => setRemaining(Math.max(0, expSec - Math.floor(Date.now() / 1000)));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [isTimedPlan, hasExpiry, expSec]);
+
+  if (!isTimedPlan || !hasExpiry || remaining < 0) return null;
+
+  if (remaining === 0) {
+    return <span className="text-xs font-semibold text-red-400">Expired</span>;
+  }
+
+  const h = Math.floor(remaining / 3600).toString().padStart(2, "0");
+  const m = Math.floor((remaining % 3600) / 60).toString().padStart(2, "0");
+  const s = (remaining % 60).toString().padStart(2, "0");
+
+  return <span className="text-xs font-mono text-solar-yellow">{h}:{m}:{s}</span>;
+}
+
 function MeterCard({ meterId, meter }: { meterId: string; meter: MeterData }) {
   const now = Date.now() / 1000; // Current time in seconds
   const expiresAt = Number(meter.expires_at);
@@ -150,6 +180,14 @@ function MeterCard({ meterId, meter }: { meterId: string; meter: MeterData }) {
         ))}
       </div>
 
+      {/* Countdown timer for time-based plans */}
+      {(meter.plan === "Daily" || meter.plan === "Weekly") && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs uppercase tracking-wider text-gray-500">Time Remaining</span>
+          <CountdownTimer expiresAt={meter.expires_at} plan={meter.plan} />
+        </div>
+      )}
+
       {/* Warning for expired or low balance */}
       {(isExpired || meter.balance === 0n) && (
         <div className="rounded-lg border border-yellow-600/40 bg-yellow-900/20 p-3 text-yellow-300 text-xs flex items-start gap-2">
@@ -176,10 +214,10 @@ function MeterCard({ meterId, meter }: { meterId: string; meter: MeterData }) {
           Top Up
         </Link>
         <Link
-          href="/history"
+          href={`/history?meterId=${meterId}`}
           className="rounded-lg border border-white/10 px-4 py-2 text-xs text-gray-300 hover:border-solar-yellow hover:text-solar-yellow transition"
         >
-          History
+          View history
         </Link>
       </div>
     </div>
@@ -293,7 +331,7 @@ export default function UserDashboardPage() {
   }, [address, meterIds]);
 
   return (
-    <>
+    <ErrorBoundary>
       <Navbar />
       <main className="min-h-screen px-4 py-8 max-w-3xl mx-auto">
         {/* Header */}
@@ -391,6 +429,6 @@ export default function UserDashboardPage() {
 
 
       </main>
-    </>
+    </ErrorBoundary>
   );
 }
