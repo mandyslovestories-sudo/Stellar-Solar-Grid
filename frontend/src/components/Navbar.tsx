@@ -1,3 +1,5 @@
+"use client";
+
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useWalletStore } from "@/store/walletStore";
@@ -27,7 +29,7 @@ export default function Navbar() {
     document.documentElement.setAttribute("data-theme", next);
   };
 
-  const short = address ? `${address.slice(0, 4)}…${address.slice(-4)}` : null;
+  const short = address ? `${address.slice(0, 4)}â€¦${address.slice(-4)}` : null;
 
   function closeMenu() {
     setMenuOpen(false);
@@ -37,8 +39,8 @@ export default function Navbar() {
     <nav className="bg-solar-accent border-b border-white/10 relative z-50">
       {/* Top bar */}
       <div className="flex items-center justify-between px-4 py-3 sm:px-6">
-        <Link href="/" className="text-xl font-bold text-solar-yellow" onClick={closeMenu}>
-          ☀️ SolarGrid
+        <Link to="/" className="text-xl font-bold text-solar-yellow" onClick={closeMenu}>
+          â˜€ï¸ SolarGrid
         </Link>
 
         {/* Desktop links */}
@@ -192,3 +194,4 @@ function WalletButton({
     </button>
   );
 }
+

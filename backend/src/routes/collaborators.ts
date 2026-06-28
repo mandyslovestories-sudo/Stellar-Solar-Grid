@@ -1,7 +1,6 @@
 import { Router } from "express";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { contractQuery, adminInvoke } from "../lib/stellar.js";
-import { requireAdminKey } from "../middleware/adminAuth.js";
 
 export const collaboratorRouter = Router();
 
@@ -28,6 +27,25 @@ collaboratorRouter.get("/", async (req, res) => {
     res.json({ collaborators });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/collaborators/meter/:meterId — list collaborators for a specific meter
+ */
+collaboratorRouter.get("/meter/:meterId", async (req, res) => {
+  try {
+    const { meterId } = req.params;
+    const raw = await contractQuery("get_collaborators", [
+      StellarSdk.nativeToScVal(meterId, { type: "symbol" }),
+    ]);
+    const collaborators = ((StellarSdk.scValToNative(raw) as any[]) ?? []).map((c: any) => ({
+      address: c.address,
+      sharePercent: Number(c.share) / 100,
+    }));
+    return res.json({ meterId, collaborators, count: collaborators.length });
+  } catch {
+    return res.status(500).json({ error: "Query failed", code: "CONTRACT_ERROR" });
   }
 });
 
