@@ -156,6 +156,7 @@ app.use("/api/collaborators", collaboratorRouter);
 app.use("/api/allowlist", allowlistRouter);
 app.use("/api/collaborators", collaboratorRouter);
 app.use("/api/stats", statsRouter);
+app.use("/api/provider", providerRouter);
 app.use("/api/metrics", metricsRouter);
 
 // #420: GET /api/health — version, uptime, dependency status
