@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/Skeleton";
 import { useToast } from "@/components/ToastProvider";
 import { getAllMeters, type MeterData } from "@/services/meterService";
 import { parseWalletError } from "@/lib/errors";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 const API = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:3001";
 
@@ -159,7 +160,7 @@ export default function ProviderDashboardPage() {
   }
 
   return (
-    <>
+    <ErrorBoundary>
       <Navbar />
       <main className="min-h-screen flex flex-col items-center px-4 py-8 sm:py-16 gap-12">
         <div className="w-full max-w-md">
@@ -303,6 +304,7 @@ export default function ProviderDashboardPage() {
               <table className="w-full text-left text-sm text-gray-300">
                 <thead className="border-b border-white/10 bg-white/5 text-xs uppercase tracking-wider text-gray-400">
                   <tr>
+                    <th className="px-6 py-4 font-semibold">Meter ID</th>
                     <th className="px-6 py-4 font-semibold">Owner</th>
                     <th className="px-6 py-4 font-semibold">Status</th>
                     <th className="px-6 py-4 font-semibold">Plan</th>
@@ -316,6 +318,9 @@ export default function ProviderDashboardPage() {
                     <>
                       {[1, 2, 3].map((i) => (
                         <tr key={i}>
+                          <td className="px-6 py-4">
+                            <Skeleton width="100px" height={14} />
+                          </td>
                           <td className="px-6 py-4">
                             <Skeleton width="140px" height={14} />
                           </td>
@@ -339,7 +344,7 @@ export default function ProviderDashboardPage() {
                     </>
                   ) : filteredMeters.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
+                      <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
                         {search ? "No meters match your search" : "No meters found."}
                       </td>
                     </tr>
@@ -354,6 +359,23 @@ export default function ProviderDashboardPage() {
 
                       return (
                         <tr key={i} className="hover:bg-white/[0.02] transition">
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-2 font-mono text-xs text-solar-yellow">
+                              <span>{m.meter_id ?? "—"}</span>
+                              {m.meter_id && (
+                                <button
+                                  aria-label={`Copy meter ID ${m.meter_id}`}
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(m.meter_id!);
+                                    showToast({ variant: "success", title: "Meter ID copied" });
+                                  }}
+                                  className="text-gray-400 hover:text-solar-yellow transition shrink-0"
+                                >
+                                  ⧉
+                                </button>
+                              )}
+                            </div>
+                          </td>
                           <td className="px-6 py-4 font-mono text-xs">
                             {m.owner.slice(0, 8)}...{m.owner.slice(-8)}
                           </td>
@@ -401,6 +423,6 @@ export default function ProviderDashboardPage() {
           </div>
         </div>
       </main>
-    </>
+    </ErrorBoundary>
   );
 }
