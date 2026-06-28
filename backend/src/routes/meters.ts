@@ -9,6 +9,7 @@ import { asyncHandler } from "../lib/asyncHandler.js";
 import { validateRequest, RegisterMeterSchema } from "../lib/validation.js";
 import { adminAuth } from "../lib/adminAuth.js";
 import { requireAdminKey } from "../middleware/adminAuth.js";
+import { cacheFor, invalidateCache, etagFor } from "../middleware/cache.js";
 import { cacheFor, invalidateCache } from "../middleware/cache.js";
 
 const balanceCache = new Map<string, { data: any; ts: number }>();
@@ -168,7 +169,54 @@ export function createMeterRouter(stellar: StellarService) {
     }),
   );
 
-  /** GET /api/meters/:id — get meter status */
+  /** GET /api/meters/:id/status — lightweight status poll */
+  meterRouter.get(
+    "/:id/status",
+    asyncHandler(async (req, res) => {
+      const { id } = req.params;
+      try {
+        const result = await stellar.query("get_meter", [
+          StellarSdk.nativeToScVal(id, { type: "symbol" }),
+        ]);
+        const meter = StellarSdk.scValToNative(result) as any;
+        if (!meter) return res.status(404).json({ error: "Meter not found", code: "METER_NOT_FOUND" });
+        return res.json({
+          meterId: id,
+          active: meter.active,
+          dailyLimit: meter.daily_limit,
+          daySpent: meter.day_spent,
+          expiresAt: meter.expires_at,
+          plan: meter.plan,
+        });
+      } catch {
+        return res.status(500).json({ error: "Query failed", code: "CONTRACT_ERROR" });
+      }
+    }),
+  );
+
+  /** GET /api/meters/owner/:address — list all meters for an owner (must be before /:id) */
+  meterRouter.get(
+    "/owner/:address",
+    asyncHandler(async (req, res) => {
+      try {
+        StellarSdk.StrKey.decodeEd25519PublicKey(req.params.address);
+      } catch {
+        return res.status(400).json({ error: "Invalid Stellar address" });
+      }
+      const result = await stellar.query("get_meters_by_owner", [
+        StellarSdk.nativeToScVal(req.params.address, { type: "address" }),
+      ]);
+      res.json({ meters: StellarSdk.scValToNative(result), owner: req.params.address });
+    }),
+  );
+
+  /**
+   * GET /api/meters/:id — get meter status with ETag support.
+   * Sets ETag header based on a hash of the meter JSON so clients can make
+   * conditional requests with If-None-Match to avoid redundant downloads.
+   *
+   * Closes #462.
+   */
   meterRouter.get(
     "/:id",
     cacheFor(5_000),
@@ -176,7 +224,16 @@ export function createMeterRouter(stellar: StellarService) {
       const result = await stellar.query("get_meter", [
         StellarSdk.nativeToScVal(req.params.id, { type: "symbol" }),
       ]);
-      res.json({ meter: StellarSdk.scValToNative(result) });
+      const data = { meter: StellarSdk.scValToNative(result) };
+      const etag = etagFor(data);
+
+      res.setHeader("ETag", etag);
+
+      if (req.headers["if-none-match"] === etag) {
+        return res.status(304).end();
+      }
+
+      res.json(data);
     }),
   );
 
@@ -379,6 +436,8 @@ export function createMeterRouter(stellar: StellarService) {
     }),
   );
 
+  return meterRouter;
+}
   /** DELETE /api/meters/:id — admin deregisters a meter */
   meterRouter.delete(
     "/:id",

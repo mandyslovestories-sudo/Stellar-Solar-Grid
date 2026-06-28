@@ -13,6 +13,11 @@ let contractCache: { data: object; expiresAt: number } | null = null;
 // Cache for the prom-client metrics summary endpoint (15s TTL)
 let metricsCache: { data: object; expiresAt: number } | null = null;
 
+// Cache for meters-by-plan breakdown (30s TTL)
+let metersByPlanCache: { data: object; expiresAt: number } | null = null;
+
+let metricsCache: { data: object; expiresAt: number } | null = null;
+
 // Cache for meter counts grouped by plan (30s TTL)
 let meterPlanCache: { data: object; expiresAt: number } | null = null;
 
@@ -109,6 +114,32 @@ statsRouter.get("/", asyncHandler(async (_req, res) => {
     totalRevenue: revenue,
   };
   contractCache = { data, expiresAt: Date.now() + 30_000 };
+  res.json(data);
+}));
+
+/**
+ * GET /api/stats/meters-by-plan — meter count breakdown by plan type.
+ * Returns zero counts for plan types with no meters.
+ * Cached for 30 seconds.
+ *
+ * Closes #461.
+ */
+statsRouter.get("/meters-by-plan", asyncHandler(async (_req, res) => {
+  if (metersByPlanCache && Date.now() < metersByPlanCache.expiresAt) {
+    return res.json(metersByPlanCache.data);
+  }
+
+  const result = await stellarService.query("get_all_meters", []);
+  const meters = (StellarSdk.scValToNative(result) as any[]) ?? [];
+
+  const counts: Record<string, number> = { Daily: 0, Weekly: 0, Usage: 0 };
+  for (const meter of meters) {
+    const plan = String(meter.plan);
+    if (plan in counts) counts[plan]++;
+  }
+
+  const data = { ...counts, total: meters.length };
+  metersByPlanCache = { data, expiresAt: Date.now() + 30_000 };
   res.json(data);
 }));
 
