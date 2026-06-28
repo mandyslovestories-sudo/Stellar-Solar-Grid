@@ -1,5 +1,4 @@
 import { Request, Response, NextFunction } from "express";
-import { createHash } from "crypto";
 
 const store = new Map<string, { data: unknown; expiresAt: number }>();
 
@@ -24,8 +23,4 @@ export function invalidateCache(prefix: string) {
   for (const key of store.keys()) {
     if (key.startsWith(prefix)) store.delete(key);
   }
-}
-
-export function etagFor(data: unknown): string {
-  return `"${createHash("sha1").update(JSON.stringify(data)).digest("hex")}"`;
 }

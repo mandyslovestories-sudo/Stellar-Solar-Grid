@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useWalletStore } from "@/store/walletStore";
 
@@ -14,8 +14,22 @@ const NAV_LINKS = [
 export default function Navbar() {
   const { address, connect, disconnect, connectError, clearConnectError } = useWalletStore();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [theme, setTheme] = useState("dark");
 
-  const short = address ? `${address.slice(0, 4)}…${address.slice(-4)}` : null;
+  useEffect(() => {
+    const savedTheme = localStorage.getItem("theme") ?? "dark";
+    setTheme(savedTheme);
+    document.documentElement.setAttribute("data-theme", savedTheme);
+  }, []);
+
+  const toggleTheme = () => {
+    const next = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    localStorage.setItem("theme", next);
+    document.documentElement.setAttribute("data-theme", next);
+  };
+
+  const short = address ? `${address.slice(0, 4)}â€¦${address.slice(-4)}` : null;
 
   function closeMenu() {
     setMenuOpen(false);
@@ -25,8 +39,8 @@ export default function Navbar() {
     <nav className="bg-solar-accent border-b border-white/10 relative z-50">
       {/* Top bar */}
       <div className="flex items-center justify-between px-4 py-3 sm:px-6">
-        <Link href="/" className="text-xl font-bold text-solar-yellow" onClick={closeMenu}>
-          ☀️ SolarGrid
+        <Link to="/" className="text-xl font-bold text-solar-yellow" onClick={closeMenu}>
+          â˜€ï¸ SolarGrid
         </Link>
 
         {/* Desktop links */}
@@ -40,12 +54,36 @@ export default function Navbar() {
               {l.label}
             </Link>
           ))}
+          <button onClick={toggleTheme} className="text-xl" title="Toggle Theme">
+            {theme === "dark" ? "🌙" : "☀️"}
+          </button>
           <WalletButton address={short} connect={connect} disconnect={disconnect} />
+          {address && (
+            <button
+              onClick={disconnect}
+              className="text-xs text-gray-400 hover:text-white transition ml-2"
+              title="Disconnect wallet"
+            >
+              Disconnect
+            </button>
+          )}
         </div>
 
         {/* Mobile: wallet button + hamburger */}
         <div className="flex items-center gap-2 sm:hidden">
+          <button onClick={toggleTheme} className="text-xl" title="Toggle Theme">
+            {theme === "dark" ? "🌙" : "☀️"}
+          </button>
           <WalletButton address={short} connect={connect} disconnect={disconnect} compact />
+          {address && (
+            <button
+              onClick={disconnect}
+              className="text-xs text-gray-400 hover:text-white transition"
+              title="Disconnect wallet"
+            >
+              ✕
+            </button>
+          )}
           <button
             onClick={() => setMenuOpen((o) => !o)}
             aria-label={menuOpen ? "Close menu" : "Open menu"}
@@ -123,13 +161,25 @@ function WalletButton({
   disconnect: () => void;
   compact?: boolean;
 }) {
+  const { address: fullAddress } = useWalletStore();
+  const [copied, setCopied] = useState(false);
+
+  const copyAddress = async () => {
+    if (!fullAddress) return;
+    await navigator.clipboard.writeText(fullAddress);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   if (address) {
     return (
       <button
-        onClick={disconnect}
+        onClick={copyAddress}
         className="rounded-lg border border-solar-yellow px-3 py-1.5 text-xs font-medium text-solar-yellow hover:bg-solar-yellow hover:text-solar-dark transition"
+        title="Copy full address"
+        aria-label="Copy wallet address"
       >
-        {address}
+        {copied ? 'Copied!' : address}
       </button>
     );
   }
@@ -144,3 +194,4 @@ function WalletButton({
     </button>
   );
 }
+

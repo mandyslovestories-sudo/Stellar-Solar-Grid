@@ -1,3 +1,4 @@
+
 import type { RequestHandler } from "express";
 import { z, type ZodTypeAny } from "zod";
 
@@ -63,6 +64,7 @@ export const SmsPaymentWebhookSchema = z
       .number()
       .positive("amount_xlm must be positive")
       .finite("amount_xlm must be a finite number"),
+    plan: PaymentPlanSchema.optional().default("Daily"),
   })
   .strict();
 
@@ -106,6 +108,7 @@ export function validateRequest(schemas: RequestSchemaSet): RequestHandler {
     if (Object.keys(details).length > 0) {
       return res.status(400).json({
         error: "Validation failed",
+        code: "VALIDATION_ERROR",
         details,
       });
     }
