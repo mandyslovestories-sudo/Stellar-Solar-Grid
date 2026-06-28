@@ -60,7 +60,6 @@ webhookRouter.post(
       StellarSdk.nativeToScVal({ [plan]: null }),
     ]);
     paymentVolume.inc(amount_xlm);
-    activeMeters.inc();
     return res.status(200).json({ hash });
   }),
 );

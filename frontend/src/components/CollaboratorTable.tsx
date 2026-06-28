@@ -140,6 +140,14 @@ export default function CollaboratorTable({ collaborators }: Props) {
             </td>
           </tr>
         </tbody>
+        <tfoot>
+          <tr className={styles.totalRow}>
+            <td colSpan={2} className={styles.totalLabel}>Total</td>
+            <td className={`${styles.totalValue} ${collaborators.reduce((sum, c) => sum + c.basisPoints, 0) > 10000 ? styles.totalExceeded : ""}`}>
+              {(collaborators.reduce((sum, c) => sum + c.basisPoints, 0) / 100).toFixed(2)}%
+            </td>
+          </tr>
+        </tfoot>
       </table>
     </div>
   );

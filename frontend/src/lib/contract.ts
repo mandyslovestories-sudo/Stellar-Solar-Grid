@@ -10,6 +10,7 @@ export interface MeterData {
   last_payment: bigint;
   expires_at: bigint;
   balance: bigint;
+  meter_id?: string;
 }
 
 const REQUEST_TIMEOUT_MS =
@@ -139,7 +140,14 @@ export async function checkMeterAccess(meterId: string): Promise<boolean> {
 }
 
 export async function fetchAllMeters(): Promise<MeterData[]> {
-  const retval = await client.query("get_all_meters", []);
-  const rawMeters = StellarSdk.scValToNative(retval) as MeterData[];
-  return rawMeters.map((m) => ({ ...m, balance: 0n }));
+  const [dataRetval, idsRetval] = await Promise.all([
+    client.query("get_all_meters", []),
+    client.query("get_all_meters_paginated", [
+      StellarSdk.nativeToScVal(0, { type: "u32" }),
+      StellarSdk.nativeToScVal(100, { type: "u32" }),
+    ]).catch(() => null),
+  ]);
+  const rawMeters = StellarSdk.scValToNative(dataRetval) as MeterData[];
+  const meterIds: string[] = idsRetval ? (StellarSdk.scValToNative(idsRetval) as string[]) : [];
+  return rawMeters.map((m, i) => ({ ...m, balance: 0n, meter_id: meterIds[i] }));
 }

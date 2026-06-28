@@ -103,7 +103,7 @@ export default function PayPage() {
       showToast({
         variant: "success",
         title: "Payment successful",
-        description: `${meterId.trim()} was topped up with ${parseFloat(amount).toFixed(2)} XLM.`,
+        description: `${meterId.trim()} topped up · tx ${hash.slice(0, 8)}…`,
         actionHref: `${EXPLORER_BASE}/${hash}`,
         actionLabel: "View transaction",
       });
