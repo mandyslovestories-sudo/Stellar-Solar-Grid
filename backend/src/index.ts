@@ -1,5 +1,4 @@
 import "dotenv/config";
-import express from "express";
 import express, { NextFunction, Request, Response } from "express";
 import cors from "cors";
 import timeout from "connect-timeout";
@@ -13,21 +12,20 @@ import { paymentsRouter } from "./routes/payments.js";
 import { webhookRouter } from "./routes/webhooks.js";
 import { collaboratorRouter } from "./routes/collaborators.js";
 import { allowlistRouter } from "./routes/allowlist.js";
-import { startIoTBridge } from "./iot/bridge.js";
-import { logger } from "./lib/logger.js";
-import { writeLimiter, readLimiter } from "./middleware/rateLimit.js";
-import { collaboratorRouter } from "./routes/collaborators.js";
 import { statsRouter } from "./routes/stats.js";
+import { metricsRouter } from "./routes/metrics.js";
 import { startIoTBridge } from "./iot/bridge.js";
 import { startLimitWatcher } from "./iot/limitWatcher.js";
 import { logger } from "./lib/logger.js";
 import { register } from "./lib/metrics.js";
+import { writeLimiter, readLimiter } from "./middleware/rateLimit.js";
+import { sanitiseBody } from "./middleware/sanitise.js";
+import requestLoggerMiddleware from "./middleware/requestLogger.js";
+import rateLimit from "express-rate-limit";
 import {
   initUsageEventStore,
   startUsageEventRetryWorker,
 } from "./lib/usageEvents.js";
-import { metricsRouter } from "./routes/metrics.js";
-import { adminLoginRouter } from "./routes/adminLogin.js";
 import { createRequire } from "module";
 
 const _require = createRequire(import.meta.url);
@@ -158,8 +156,9 @@ app.use("/api/collaborators", collaboratorRouter);
 app.use("/api/allowlist", allowlistRouter);
 app.use("/api/collaborators", collaboratorRouter);
 app.use("/api/stats", statsRouter);
+app.use("/api/provider", providerRouter);
 app.use("/api/metrics", metricsRouter);
-app.use("/api/admin/login", adminLoginRouter);
+app.use("/api/solar", solarRouter);
 
 // #420: GET /api/health — version, uptime, dependency status
 app.get("/api/health", async (_req, res) => {
@@ -175,15 +174,11 @@ app.get("/api/health", async (_req, res) => {
   }
 
   // Check MQTT
-  const broker = process.env.MQTT_BROKER ?? "mqtt://localhost:1883";
   let mqttOk = false;
   try {
-    const client = mqtt.connect(broker, { reconnectPeriod: 0, connectTimeout: 3000 });
-    mqttOk = await new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => { client.end(true); resolve(false); }, 3000);
-      client.once("connect", () => { clearTimeout(timer); client.end(true); resolve(true); });
-      client.once("error", () => { clearTimeout(timer); client.end(true); resolve(false); });
-    });
+    const { getMqttClient } = await import("./iot/bridge.js");
+    const client = getMqttClient();
+    mqttOk = client?.connected ?? false;
   } catch {
     logger.warn("MQTT health check failed");
   }
@@ -230,7 +225,7 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   if (err.type === "entity.too.large") {
     return res.status(413).json({ error: "Request body too large", code: "PAYLOAD_TOO_LARGE" });
   }
-  if (err.type === "entity.parse.failed" || (err instanceof SyntaxError && err.body !== undefined)) {
+  if (err.type === "entity.parse.failed" || (err instanceof SyntaxError && (err as any).body !== undefined)) {
     return res.status(400).json({ error: "Invalid JSON body", code: "INVALID_JSON" });
   }
   if ((err as any).status === 404) {

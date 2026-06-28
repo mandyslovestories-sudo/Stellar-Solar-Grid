@@ -76,6 +76,33 @@ export function createMeterRouter(stellar: StellarService) {
     }),
   );
 
+  /** GET /api/meters/expiring — return meters expiring within the next 24 hours */
+  meterRouter.get(
+    "/expiring",
+    requireAdminKey,
+    asyncHandler(async (req, res) => {
+      const windowHours = Number(req.query.hours ?? 24);
+      if (isNaN(windowHours) || windowHours <= 0) {
+        return res.status(400).json({ error: "Invalid hours parameter" });
+      }
+
+      const result = await stellar.query("get_all_meters", []);
+      const allMeters = (StellarSdk.scValToNative(result) as any[]) ?? [];
+
+      const nowMs = Date.now();
+      const thresholdMs = nowMs + windowHours * 60 * 60 * 1000;
+
+      const expiring = allMeters.filter((m: any) => {
+        if (!m.expires_at) return false;
+        // Assume expires_at is in seconds since epoch based on Stellar types
+        const expiresMs = Number(m.expires_at) * 1000;
+        return expiresMs > nowMs && expiresMs <= thresholdMs;
+      });
+
+      res.json({ expiring, count: expiring.length });
+    })
+  );
+
   /** GET /api/meters/:id/status — lightweight status poll */
   meterRouter.get(
     "/:id/status",
@@ -98,6 +125,8 @@ export function createMeterRouter(stellar: StellarService) {
       } catch {
         return res.status(500).json({ error: "Query failed", code: "CONTRACT_ERROR" });
       }
+    }),
+  );
   /** GET /api/meters/owner/:address — list all meters for an owner (must be before /:id) */
   meterRouter.get(
     "/owner/:address",
@@ -111,6 +140,31 @@ export function createMeterRouter(stellar: StellarService) {
         StellarSdk.nativeToScVal(req.params.address, { type: "address" }),
       ]);
       res.json({ meters: StellarSdk.scValToNative(result), owner: req.params.address });
+    }),
+  );
+
+  /** GET /api/meters/:id/plan — current plan type and expiry timestamp */
+  meterRouter.get(
+    "/:id/plan",
+    cacheFor(5_000),
+    asyncHandler(async (req, res) => {
+      const meterId = req.params.id;
+      let meter: any;
+      try {
+        const result = await stellar.query("get_meter", [
+          StellarSdk.nativeToScVal(meterId, { type: "symbol" }),
+        ]);
+        meter = StellarSdk.scValToNative(result);
+      } catch {
+        return res.status(404).json({ error: "Meter not found", code: "NOT_FOUND" });
+      }
+      if (!meter) return res.status(404).json({ error: "Meter not found", code: "NOT_FOUND" });
+      return res.json({
+        meter_id: meterId,
+        plan: meter.plan,
+        expires_at: meter.expires_at,
+        active: meter.active,
+      });
     }),
   );
 
@@ -322,6 +376,64 @@ export function createMeterRouter(stellar: StellarService) {
       } catch (err: any) {
         return res.status(500).json({ error: err.message, code: "CONTRACT_ERROR" });
       }
+    }),
+  );
+
+  /** DELETE /api/meters/:id — admin deregisters a meter */
+  meterRouter.delete(
+    "/:id",
+    requireAdminKey,
+    asyncHandler(async (req, res) => {
+      const meterId = req.params.id;
+      let meter: any;
+      try {
+        const result = await stellar.query("get_meter", [
+          StellarSdk.nativeToScVal(meterId, { type: "symbol" }),
+        ]);
+        meter = StellarSdk.scValToNative(result);
+      } catch {
+        return res.status(404).json({ error: "Meter not found", code: "NOT_FOUND" });
+      }
+      if (!meter) return res.status(404).json({ error: "Meter not found", code: "NOT_FOUND" });
+      const hash = await stellar.invoke("deregister_meter", [
+        StellarSdk.nativeToScVal(meterId, { type: "symbol" }),
+      ]);
+      invalidateCache(`/api/meters/${meterId}`);
+      return res.json({ hash, meter_id: meterId, deleted: true });
+    }),
+  );
+
+  /** POST /api/meters/:id/renew — trigger plan renewal payment for an expired meter */
+  meterRouter.post(
+    "/:id/renew",
+    requireAdminKey,
+    asyncHandler(async (req, res) => {
+      const meterId = req.params.id;
+      const { amount_xlm, plan } = req.body as { amount_xlm: unknown; plan: unknown };
+
+      const amount = Number(amount_xlm);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return res.status(400).json({ error: "amount_xlm must be a positive number", code: "VALIDATION_ERROR" });
+      }
+
+      let meter: any;
+      try {
+        const result = await stellar.query("get_meter", [
+          StellarSdk.nativeToScVal(meterId, { type: "symbol" }),
+        ]);
+        meter = StellarSdk.scValToNative(result);
+      } catch {
+        return res.status(404).json({ error: "Meter not found", code: "NOT_FOUND" });
+      }
+      if (!meter) return res.status(404).json({ error: "Meter not found", code: "NOT_FOUND" });
+
+      const planValue = plan ?? meter.plan;
+      const hash = await stellar.invoke("make_payment", [
+        StellarSdk.nativeToScVal(meterId, { type: "symbol" }),
+        StellarSdk.nativeToScVal(BigInt(Math.round(amount * 1e7)), { type: "i128" }),
+        StellarSdk.nativeToScVal(planValue, { type: "symbol" }),
+      ]);
+      return res.json({ hash, meter_id: meterId, renewed: true });
     }),
   );
 
