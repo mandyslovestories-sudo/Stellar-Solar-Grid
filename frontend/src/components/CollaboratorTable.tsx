@@ -12,11 +12,13 @@ interface Props {
   collaborators: Collaborator[];
   onAdd: (address: string, basisPoints: number) => Promise<void>;
   onRemove: (address: string) => Promise<void>;
+  onRefresh?: () => Promise<void>;
 }
 
 import styles from './CollaboratorTable.module.css';
 
-export default function CollaboratorTable({ collaborators }: Props) {
+export default function CollaboratorTable({ collaborators, onAdd, onRemove, onRefresh }: Props) {
+  const { showToast } = useToast();
   const [copied, setCopied] = useState<string | null>(null);
   const [newAddress, setNewAddress] = useState("");
   const [newBasisPoints, setNewBasisPoints] = useState("");
@@ -27,6 +29,59 @@ export default function CollaboratorTable({ collaborators }: Props) {
     navigator.clipboard.writeText(address);
     setCopied(address);
     setTimeout(() => setCopied(null), 1500);
+  }
+
+  async function handleAddSubmit() {
+    if (!newAddress.trim() || !newBasisPoints.trim()) {
+      showToast({
+        variant: "error",
+        title: "Invalid input",
+        description: "Please enter both address and basis points.",
+      });
+      return;
+    }
+
+    setIsAdding(true);
+    try {
+      await onAdd(newAddress.trim(), Number(newBasisPoints));
+      setNewAddress("");
+      setNewBasisPoints("");
+      if (onRefresh) await onRefresh();
+      showToast({
+        variant: "success",
+        title: "Collaborator added",
+        description: "The collaborator list has been updated.",
+      });
+    } catch (err) {
+      showToast({
+        variant: "error",
+        title: "Failed to add collaborator",
+        description: err instanceof Error ? err.message : "Failed to add collaborator",
+      });
+    } finally {
+      setIsAdding(false);
+    }
+  }
+
+  async function handleRemove(address: string) {
+    setIsRemoving(address);
+    try {
+      await onRemove(address);
+      if (onRefresh) await onRefresh();
+      showToast({
+        variant: "success",
+        title: "Collaborator removed",
+        description: "The collaborator list has been updated.",
+      });
+    } catch (err) {
+      showToast({
+        variant: "error",
+        title: "Failed to remove collaborator",
+        description: err instanceof Error ? err.message : "Failed to remove collaborator",
+      });
+    } finally {
+      setIsRemoving(null);
+    }
   }
 
   // Empty state — helpful message instead of silent null
