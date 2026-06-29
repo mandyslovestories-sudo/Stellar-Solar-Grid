@@ -57,6 +57,7 @@ export function createMeterRouter(stellar: StellarService) {
   /** GET /api/meters/export?format=csv|json — download all meter data */
   meterRouter.get(
     "/export",
+    requireAdminKey,
     asyncHandler(async (req, res) => {
       const format = req.query.format === "json" ? "json" : "csv";
       const result = await stellar.query("get_all_meters", []);

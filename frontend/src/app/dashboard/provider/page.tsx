@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
-import { Skeleton } from "@/components/Skeleton";
+import { SkeletonCard } from "@/components/SkeletonCard";
 import { useToast } from "@/components/ToastProvider";
 import { getAllMeters, type MeterData } from "@/services/meterService";
 import { parseWalletError } from "@/lib/errors";
@@ -32,6 +32,7 @@ export default function ProviderDashboardPage() {
 
   const [meters, setMeters] = useState<MeterData[]>([]);
   const [fetching, setFetching] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -66,11 +67,13 @@ export default function ProviderDashboardPage() {
 
   const fetchMeters = useCallback(async () => {
     setFetching(true);
+    setFetchError(null);
     try {
       const allMeters = await getAllMeters();
       setMeters(allMeters);
     } catch (err: unknown) {
       console.error("Failed to fetch meters:", err);
+      setFetchError(err instanceof Error ? err.message : "Failed to fetch meters");
     } finally {
       setFetching(false);
     }
@@ -314,30 +317,36 @@ export default function ProviderDashboardPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {fetching && meters.length === 0 ? (
+                  {fetchError ? (
+                    <tr>
+                      <td colSpan={7} className="px-6 py-12 text-center text-red-500">
+                        {fetchError}
+                      </td>
+                    </tr>
+                  ) : fetching && meters.length === 0 ? (
                     <>
-                      {[1, 2, 3].map((i) => (
+                      {[1, 2, 3, 4, 5].map((i) => (
                         <tr key={i}>
                           <td className="px-6 py-4">
-                            <Skeleton width="100px" height={14} />
+                            <SkeletonCard height={14} />
                           </td>
                           <td className="px-6 py-4">
-                            <Skeleton width="140px" height={14} />
+                            <SkeletonCard height={14} />
                           </td>
                           <td className="px-6 py-4">
-                            <Skeleton width="60px" height={18} />
+                            <SkeletonCard height={18} />
                           </td>
                           <td className="px-6 py-4">
-                            <Skeleton width="70px" height={14} />
+                            <SkeletonCard height={14} />
                           </td>
                           <td className="px-6 py-4">
-                            <Skeleton width="50px" height={14} />
+                            <SkeletonCard height={14} />
                           </td>
                           <td className="px-6 py-4">
-                            <Skeleton width="80px" height={14} />
+                            <SkeletonCard height={14} />
                           </td>
                           <td className="px-6 py-4">
-                            <Skeleton width="80px" height={28} />
+                            <SkeletonCard height={28} />
                           </td>
                         </tr>
                       ))}

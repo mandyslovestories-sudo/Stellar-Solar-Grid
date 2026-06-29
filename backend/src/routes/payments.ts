@@ -110,8 +110,12 @@ async function fetchPaymentEvents(
     const EVT_NS = StellarSdk.xdr.ScVal.scvSymbol("solargrid").toXDR("base64");
     const ACTION = StellarSdk.xdr.ScVal.scvSymbol("payment").toXDR("base64");
 
+    const latestLedgerResp = await (server as any).getLatestLedger();
+    const latestLedger = latestLedgerResp.sequence;
+    const startLedger = Math.max(1, latestLedger - Math.floor((days * 24 * 60 * 60) / 6));
+
     const response = await (server as any).getEvents({
-      startLedger: 1,
+      startLedger,
       filters: [
         {
           type: "contract",

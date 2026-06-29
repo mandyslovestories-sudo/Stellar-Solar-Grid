@@ -7,12 +7,14 @@ export function cacheFor(ttlMs: number) {
     const key = req.originalUrl;
     const cached = store.get(key);
     if (cached && Date.now() < cached.expiresAt) {
+      res.setHeader('Cache-Control', `public, max-age=${Math.floor(ttlMs / 1000)}`);
       return res.json(cached.data);
     }
     const original = res.json.bind(res);
     res.json = (data: unknown) => {
       if (store.size > 500) store.clear(); // bound memory
       store.set(key, { data, expiresAt: Date.now() + ttlMs });
+      res.setHeader('Cache-Control', `public, max-age=${Math.floor(ttlMs / 1000)}`);
       return original(data);
     };
     next();
