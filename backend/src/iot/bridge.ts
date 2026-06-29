@@ -11,7 +11,7 @@
 import mqtt from "mqtt";
 import { logger } from "../lib/logger.js";
 import { persistAndSubmitUsageEvent, insertSubmittedUsageEvents, getKV, setKV } from "../lib/usageEvents.js";
-import { getWebhookUrls } from "../lib/webhookRegistry.js";
+import { getWebhookUrls, fireWebhook } from "../lib/webhookRegistry.js";
 import { UsageUpdateSchema } from "../lib/validation.js";
 import {
   adminInvoke,
@@ -66,19 +66,16 @@ async function checkAndNotifyLowBalance(meterId: string) {
         threshold: LOW_BALANCE_THRESHOLD,
         timestamp: new Date().toISOString(),
       });
+
+      // Fire webhooks with automatic retry
       await Promise.all(
-        [...urls].map((url) =>
-          fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body,
-          }).catch((err) => logger.error("Low balance webhook failed", { url, meterId, err })),
-        ),
+        [...urls].map((url) => fireWebhook(url, body)),
       );
+
       logger.info("Low balance webhook fired", { meterId, balance });
     }
   } catch (err) {
-    logger.error("Low balance webhook failed", { meterId, err });
+    logger.error("Low balance webhook check failed", { meterId, err });
   }
 }
 
