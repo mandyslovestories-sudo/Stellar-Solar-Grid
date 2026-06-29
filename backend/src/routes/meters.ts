@@ -338,6 +338,91 @@ export function createMeterRouter(stellar: StellarService) {
     }
   });
 
+  /** GET /api/meters/:id/events — paginated on-chain events for a single meter */
+  meterRouter.get(
+    "/:id/events",
+    asyncHandler(async (req, res) => {
+      const meterId = req.params.id;
+      const page = Math.max(1, parseInt((req.query.page as string) ?? "1", 10));
+      const limit = Math.min(
+        50,
+        Math.max(1, parseInt((req.query.limit as string) ?? "20", 10)),
+      );
+      const days = Math.min(
+        90,
+        Math.max(1, parseInt((req.query.days as string) ?? "30", 10)),
+      );
+
+      // Check if meter exists
+      try {
+        await stellar.query("get_meter", [
+          StellarSdk.nativeToScVal(meterId, { type: "symbol" }),
+        ]);
+      } catch {
+        return res.status(404).json({ error: "Meter not found", code: "NOT_FOUND" });
+      }
+
+      try {
+        // Query Soroban RPC for contract events filtered by meter ID
+        const EVT_NS = StellarSdk.xdr.ScVal.scvSymbol("solargrid").toXDR("base64");
+        const meterTopic = StellarSdk.nativeToScVal(meterId, { type: "symbol" }).toXDR("base64");
+
+        const response = await (stellar.server as any).getEvents({
+          startLedger: 1,
+          filters: [
+            {
+              type: "contract",
+              contractIds: [stellar.contractId],
+              topics: [
+                [EVT_NS],
+                [],
+                [meterTopic], // Filter by meter ID in topic[2]
+              ],
+            },
+          ],
+          limit: 1000,
+        });
+
+        const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+        const events: any[] = [];
+
+        for (const event of response?.events ?? []) {
+          try {
+            const parsed = parseContractEvent(event);
+            if (parsed && new Date(parsed.timestamp).getTime() >= cutoff) {
+              events.push(parsed);
+            }
+          } catch {
+            // skip malformed events
+          }
+        }
+
+        // Sort by timestamp descending (newest first)
+        events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+        const total = events.length;
+        const start = (page - 1) * limit;
+        const paginated = events.slice(start, start + limit);
+
+        return res.json({
+          events: paginated,
+          pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+        });
+      } catch (err: any) {
+        if (err?.code === "RPC_ERROR" || err?.isRpcError) {
+          return res.status(502).json({
+            error: err.message ?? "RPC request failed",
+            code: "RPC_ERROR",
+          });
+        }
+        return res.status(500).json({
+          error: err.message ?? "Failed to fetch events",
+          code: "INTERNAL_ERROR",
+        });
+      }
+    }),
+  );
+
   /** POST /api/meters/:id/set-daily-limit — admin sets daily spending limit for a meter */
   meterRouter.post(
     "/:id/set-daily-limit",
@@ -534,6 +619,68 @@ export function createMeterRouter(stellar: StellarService) {
       return res.json({ hash, meter_id: meterId, renewed: true });
     }),
   );
+
+  // ── Helper Functions ──────────────────────────────────────────────────────
+
+  /**
+   * Parse a contract event into a structured format.
+   * Contract events have topics: (EVT_NS, action, meter_id)
+   * and data varies by event type (payment, usage, etc.)
+   */
+  function parseContractEvent(event: any): any | null {
+    try {
+      const topics: StellarSdk.xdr.ScVal[] = (event.topic ?? []).map((t: string) =>
+        StellarSdk.xdr.ScVal.fromXDR(t, "base64"),
+      );
+
+      if (topics.length < 2) return null;
+
+      // topics[0] = namespace "solargrid", topics[1] = action (payment, usage, etc.)
+      const actionVal = topics[1];
+      const action =
+        actionVal.switch().name === "scvSymbol"
+          ? actionVal.sym().toString()
+          : "unknown";
+
+      // topics[2] = meter_id (if present)
+      let meterId = "unknown";
+      if (topics.length >= 3) {
+        const meterVal = topics[2];
+        meterId =
+          meterVal.switch().name === "scvSymbol"
+            ? meterVal.sym().toString()
+            : "unknown";
+      }
+
+      // Parse event data
+      const dataXdr = event.value ?? event.data;
+      let eventData: any = null;
+
+      if (dataXdr) {
+        try {
+          const dataVal = StellarSdk.xdr.ScVal.fromXDR(dataXdr, "base64");
+          eventData = StellarSdk.scValToNative(dataVal);
+        } catch {
+          // leave null
+        }
+      }
+
+      const timestamp = event.ledgerClosedAt
+        ? new Date(event.ledgerClosedAt).toISOString()
+        : new Date().toISOString();
+
+      return {
+        id: event.id ?? event.txHash ?? `${event.ledger}-${event.contractId}`,
+        txHash: event.txHash ?? "",
+        timestamp,
+        action,
+        meterId,
+        data: eventData,
+      };
+    } catch {
+      return null;
+    }
+  }
 
   return meterRouter;
 }
