@@ -437,6 +437,45 @@ export function createMeterRouter(stellar: StellarService) {
     }),
   );
 
+  /** POST /api/meters/:id/transfer — admin transfers meter ownership to a new owner */
+  meterRouter.post(
+    "/:id/transfer",
+    requireAdminKey,
+    asyncHandler(async (req, res) => {
+      const meterId = req.params.id;
+      const { new_owner } = req.body;
+
+      // Validate new_owner is provided
+      if (!new_owner) {
+        return res.status(400).json({ error: "new_owner is required", code: "VALIDATION_ERROR" });
+      }
+
+      // Validate new_owner is a valid Stellar address
+      try {
+        StellarSdk.StrKey.decodeEd25519PublicKey(new_owner);
+      } catch {
+        return res.status(400).json({ error: "Invalid Stellar address", code: "VALIDATION_ERROR" });
+      }
+
+      // Check if meter exists
+      try {
+        await stellar.query("get_meter", [
+          StellarSdk.nativeToScVal(meterId, { type: "symbol" }),
+        ]);
+      } catch {
+        return res.status(404).json({ error: "Meter not found", code: "NOT_FOUND" });
+      }
+
+      // Invoke transfer_meter_ownership contract function
+      const hash = await stellar.invoke("transfer_meter_ownership", [
+        StellarSdk.nativeToScVal(meterId, { type: "symbol" }),
+        StellarSdk.nativeToScVal(new_owner, { type: "address" }),
+      ]);
+
+      res.json({ hash, meter_id: meterId, new_owner });
+    }),
+  );
+
   return meterRouter;
 }
   /** DELETE /api/meters/:id — admin deregisters a meter */
