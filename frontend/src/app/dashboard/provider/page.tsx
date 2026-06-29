@@ -380,18 +380,7 @@ export default function ProviderDashboardPage() {
                             {m.owner.slice(0, 8)}...{m.owner.slice(-8)}
                           </td>
                           <td className="px-6 py-4">
-                            <span
-                              className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
-                                isActive
-                                  ? "bg-green-500/10 text-green-500"
-                                  : "bg-red-500/10 text-red-500"
-                              }`}
-                            >
-                              <span
-                                className={`h-1 w-1 rounded-full ${isActive ? "bg-green-500" : "bg-red-500"}`}
-                              />
-                              {isActive ? "Active" : "Inactive"}
-                            </span>
+                            <MeterStatusBadge active={m.active} expiresAt={expiresAt} />
                           </td>
                           <td className="px-6 py-4 text-xs font-medium">{m.plan}</td>
                           <td className="px-6 py-4 text-xs">

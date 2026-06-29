@@ -1,4 +1,5 @@
 import React from "react";
+import { MeterStatusBadge } from "./MeterStatusBadge";
 
 export interface MeterCardProps {
   meterId: string;
@@ -30,19 +31,16 @@ export function MeterCard({
   // Convert stroops to XLM (1 XLM = 10,000,000 stroops)
   const balanceXlm = (balanceNum / 1e7).toFixed(2);
 
-  // Status color and label
   const isExpired =
     expiresAtNum !== Number.MAX_SAFE_INTEGER &&
     expiresAtNum > 0 &&
     Date.now() / 1000 >= expiresAtNum;
   const statusActive = active && !isExpired;
-  const statusColor = statusActive ? "green" : "red";
-  const statusLabel = statusActive ? "Active" : "Inactive";
 
   return (
     <div
       className="rounded-xl border border-white/10 bg-solar-accent p-5 transition hover:border-white/20"
-      aria-label={`Meter ${meterId} (${owner.slice(0, 8)}...${owner.slice(-8)}) - ${statusLabel}`}
+      aria-label={`Meter ${meterId} (${owner.slice(0, 8)}...${owner.slice(-8)})`}
     >
       {/* Header: Meter ID and Status Badge */}
       <div className="flex items-start justify-between gap-3 mb-4">
@@ -52,16 +50,7 @@ export function MeterCard({
             {owner.slice(0, 8)}...{owner.slice(-8)}
           </p>
         </div>
-        <span
-          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase whitespace-nowrap ${
-            statusActive ? "bg-green-500/10 text-green-500" : "bg-red-500/10 text-red-500"
-          }`}
-        >
-          <span
-            className={`h-1.5 w-1.5 rounded-full ${statusActive ? "bg-green-500" : "bg-red-500"}`}
-          />
-          {statusLabel}
-        </span>
+        <MeterStatusBadge active={active} expiresAt={expiresAtNum} />
       </div>
 
       {/* Balance */}
@@ -91,7 +80,7 @@ export function MeterCard({
       </div>
 
       {/* Deactivate Button */}
-      {statusActive && onDeactivate && (
+      {active && !isExpired && onDeactivate && (
         <button
           onClick={onDeactivate}
           disabled={isDeactivating}

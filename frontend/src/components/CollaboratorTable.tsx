@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useToast } from "@/components/ToastProvider";
 import { Skeleton } from "@/components/Skeleton";
 
@@ -25,6 +25,41 @@ export default function CollaboratorTable({ collaborators, loading }: Props) {
   const [newBasisPoints, setNewBasisPoints] = useState("");
   const [isAdding, setIsAdding] = useState(false);
   const [isRemoving, setIsRemoving] = useState<string | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Focus trap + Escape key for confirmation dialog
+  useEffect(() => {
+    if (!confirmRemove) return;
+
+    // Focus the dialog when it opens
+    const el = dialogRef.current;
+    if (!el) return;
+    const focusable = el.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    first?.focus();
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setConfirmRemove(null);
+        return;
+      }
+      if (e.key === "Tab") {
+        if (focusable.length === 0) { e.preventDefault(); return; }
+        if (e.shiftKey) {
+          if (document.activeElement === first) { e.preventDefault(); last?.focus(); }
+        } else {
+          if (document.activeElement === last) { e.preventDefault(); first?.focus(); }
+        }
+      }
+    }
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [confirmRemove]);
 
   function copyAddress(address: string) {
     navigator.clipboard.writeText(address);
@@ -70,66 +105,127 @@ export default function CollaboratorTable({ collaborators, loading }: Props) {
   }
 
   return (
-    <div className="card overflow-x-auto">
-      <span className="badge">Collaborators</span>
-      <table className="collab-table">
-        <thead>
-          <tr>
-            <th>Address</th>
-            <th className="text-right">Share</th>
-          </tr>
-        </thead>
-        <tbody>
-          {collaborators.length === 0 && (
+    <>
+      {/* Confirmation dialog */}
+      {confirmRemove && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirm-remove-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+        >
+          <div
+            ref={dialogRef}
+            className="w-full max-w-sm rounded-xl border border-white/10 bg-solar-accent p-6 shadow-2xl space-y-4"
+          >            <h3 id="confirm-remove-title" className="text-base font-semibold text-white">
+              Remove Collaborator?
+            </h3>
+            <p className="text-sm text-gray-400">
+              This will remove{" "}
+              <span className="font-mono text-white">
+                {confirmRemove.slice(0, 8)}…{confirmRemove.slice(-6)}
+              </span>{" "}
+              and their revenue share allocation. This cannot be undone.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setConfirmRemove(null)}
+                className="px-4 py-2 text-sm rounded-lg border border-white/10 text-gray-300 hover:border-white/30 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleRemove(confirmRemove)}
+                className="px-4 py-2 text-sm rounded-lg bg-red-500/20 border border-red-500/40 text-red-400 hover:bg-red-500/30 transition"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="card overflow-x-auto">
+        <span className="badge">Collaborators</span>
+        <table className="collab-table">
+          <thead>
             <tr>
-              <td colSpan={3} className="text-center text-xs text-gray-500 py-6">
-                No revenue collaborators configured yet.
-              </td>
+              <th>Address</th>
+              <th className="text-right">Share</th>
             </tr>
-          )}
-
-          {collaborators.map((c) => (
-            <tr key={c.address}>
-              {/* Truncated address with full-address tooltip + copy button */}
-              <td>
-                <div className="address-cell">
-                  <span title={c.address} className="address-truncated">
-                    {c.address.slice(0, 8)}...{c.address.slice(-6)}
+          </thead>
+          <tbody>
+            {collaborators.map((c) => (
+              <tr key={c.address}>
+                <td>
+                  <div className="address-cell">
+                    <span title={c.address} className="address-truncated">
+                      {c.address.slice(0, 8)}...{c.address.slice(-6)}
+                    </span>
+                    <button
+                      className="copy-btn-sm"
+                      onClick={() => copyAddress(c.address)}
+                      title="Copy address"
+                    >
+                      {copied === c.address ? "✓" : "⧉"}
+                    </button>
+                  </div>
+                </td>
+                <td className={styles.shareCell}>
+                  <span className={styles.shareLabel}>
+                    {(c.basisPoints / 100).toFixed(2)}%
                   </span>
+                  <div
+                    className="share-bar"
+                    style={{ width: `${c.basisPoints / 100}%` }}
+                    role="meter"
+                    aria-valuenow={c.basisPoints / 100}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label={`${(c.basisPoints / 100).toFixed(2)}% share`}
+                  />
+                </td>
+                <td style={{ textAlign: "right" }}>
                   <button
-                    className="copy-btn-sm"
-                    onClick={() => copyAddress(c.address)}
-                    title="Copy address"
+                    onClick={() => setConfirmRemove(c.address)}
+                    disabled={isRemoving !== null || isAdding}
+                    className="text-red-400 hover:text-red-300 disabled:opacity-40 text-xs px-2.5 py-1 border border-red-500/30 rounded-lg hover:bg-red-500/10 transition"
                   >
-                    {copied === c.address ? "✓" : "⧉"}
+                    {isRemoving === c.address ? "Removing..." : "Remove"}
                   </button>
-                </div>
-              </td>
+                </td>
+              </tr>
+            ))}
 
-              {/* Share bar with visible percentage label */}
-              <td className={styles.shareCell}>
-                <span className={styles.shareLabel}>
-                  {(c.basisPoints / 100).toFixed(2)}%
-                </span>
-                <div
-                  className="share-bar"
-                  style={{ width: `${c.basisPoints / 100}%` }}
-                  role="meter"
-                  aria-valuenow={c.basisPoints / 100}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-label={`${(c.basisPoints / 100).toFixed(2)}% share`}
+            {/* Inline Add Collaborator Form Row */}
+            <tr>
+              <td className="pt-4">
+                <input
+                  type="text"
+                  placeholder="Stellar Address (G...)"
+                  value={newAddress}
+                  onChange={(e) => setNewAddress(e.target.value)}
+                  disabled={isAdding || isRemoving !== null}
+                  className="w-full bg-solar-dark border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-solar-yellow transition"
                 />
               </td>
-
-              {/* Remove Action Button */}
-              <td style={{ textAlign: "right" }}>
+              <td className="pt-4">
+                <input
+                  type="number"
+                  placeholder="Basis points (100 = 1%)"
+                  value={newBasisPoints}
+                  onChange={(e) => setNewBasisPoints(e.target.value)}
+                  disabled={isAdding || isRemoving !== null}
+                  className="w-full bg-solar-dark border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-solar-yellow transition"
+                />
+              </td>
+              <td className="pt-4" style={{ textAlign: "right" }}>
                 <button
-                  onClick={() => handleRemove(c.address)}
-                  disabled={isRemoving !== null || isAdding}
-                  className="text-red-400 hover:text-red-300 disabled:opacity-40 text-xs px-2.5 py-1 border border-red-500/30 rounded-lg hover:bg-red-500/10 transition"
+                  onClick={handleAddSubmit}
+                  disabled={isAdding || isRemoving !== null}
+                  className="bg-solar-yellow text-solar-dark text-xs font-semibold px-4 py-1.5 rounded-lg hover:opacity-90 disabled:opacity-50 transition"
                 >
-                  {isRemoving === c.address ? "Removing..." : "Remove"}
+                  {isAdding ? "Adding..." : "Add"}
                 </button>
               </td>
             </tr>
