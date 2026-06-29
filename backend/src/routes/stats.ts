@@ -16,8 +16,6 @@ let metricsCache: { data: object; expiresAt: number } | null = null;
 // Cache for meters-by-plan breakdown (30s TTL)
 let metersByPlanCache: { data: object; expiresAt: number } | null = null;
 
-let metricsCache: { data: object; expiresAt: number } | null = null;
-
 // Cache for meter counts grouped by plan (30s TTL)
 let meterPlanCache: { data: object; expiresAt: number } | null = null;
 
@@ -107,11 +105,17 @@ statsRouter.get("/", asyncHandler(async (_req, res) => {
     logger.warn('ADMIN_ADDRESS environment variable is not set; provider revenue query skipped');
   }
 
+  const avgUnitsPerMeter = total > 0 ? units / total : 0;
+  const avgRevenue = total > 0 ? revenue / total : 0;
+
   const data = {
     totalMeters: total,
     activeMeters: active,
+    inactiveMeters: total - active,
     totalUnits: units,
+    avgUnitsPerMeter,
     totalRevenue: revenue,
+    avgRevenue,
   };
   contractCache = { data, expiresAt: Date.now() + 30_000 };
   res.json(data);
