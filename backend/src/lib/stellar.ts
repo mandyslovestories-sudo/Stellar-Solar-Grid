@@ -116,6 +116,48 @@ export class StellarService {
       throw new Error(scrub(err?.message ?? String(err)));
     }
   }
+
+  /**
+   * Convert a UNIX timestamp (milliseconds) to an approximate Stellar ledger number.
+   * Uses Horizon API to find the ledger closest to the given timestamp.
+   */
+  async timestampToLedger(unixTimestampMs: number): Promise<number> {
+    try {
+      const horizonUrl =
+        this.networkPassphrase === StellarSdk.Networks.PUBLIC
+          ? "https://horizon.stellar.org"
+          : "https://horizon-testnet.stellar.org";
+
+      const horizonServer = new StellarSdk.Horizon.Server(horizonUrl);
+      
+      // Convert milliseconds to seconds for Horizon
+      const isoTimestamp = new Date(unixTimestampMs).toISOString();
+      
+      // Query ledgers near the given timestamp
+      const ledgers = await horizonServer
+        .ledgers()
+        .order("desc")
+        .limit(200)
+        .call();
+
+      let closestLedger = 1;
+      let closestDiff = Infinity;
+
+      for (const ledger of ledgers.records) {
+        const ledgerTime = new Date(ledger.closed_at).getTime();
+        const diff = Math.abs(ledgerTime - unixTimestampMs);
+
+        if (diff < closestDiff) {
+          closestDiff = diff;
+          closestLedger = ledger.sequence;
+        }
+      }
+
+      return closestLedger;
+    } catch (err: any) {
+      throw new Error(scrub(`Failed to convert timestamp to ledger: ${err?.message ?? String(err)}`));
+    }
+  }
 }
 
 // Singleton instance — created once at startup and injected into routes.
